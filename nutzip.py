@@ -14,14 +14,16 @@ Handles Acorn/RISC OS-specific metadata stored in ZIP archives, preserving
 load addresses, execution addresses, and file attributes that standard
 unzip tools discard.
 
-Supports two metadata sources within ZIP files:
+Supports three metadata sources within ZIP files:
   - SparkFS extra fields (header ID 0x4341, "ARC0" signature)
-  - NFS filename encoding (,xxx filetype or ,llllllll,eeeeeeee load/exec)
+  - Bundled INF sidecar files (Acorn or PiEconetBridge format)
+  - Unix filename encoding (,xxx filetype or ,llllllll,eeeeeeee load/exec)
 
-Supports three output metadata formats:
-  - Standard Acorn INF: filename load exec length [access]
+Supports four output metadata formats:
+  - Acorn INF: filename load exec length [access]
   - PiEconetBridge INF: owner load exec perm [homeof]
   - Extended attributes: user.econet_{load,exec,perm,owner} xattrs
+  - Unix filename encoding: ,xxx or ,llllllll,eeeeeeee suffixes
 
 References:
   - INF format: https://beebwiki.mdfs.net/INF_file_format
@@ -49,11 +51,11 @@ SPARKFS_HEADER_ID = 0x4341  # "AC" in little-endian
 SPARKFS_SIGNATURE = b"ARC0"
 SPARKFS_DATA_LENGTH = 20  # 4 sig + 4 load + 4 exec + 4 attr + 4 reserved
 
-# NFS filename encoding patterns
+# Unix filename encoding patterns
 # ,xxx = 3-hex-digit filetype
 # ,llllllll,eeeeeeee = 8-hex-digit load and exec addresses
-NFS_FILETYPE_RE = re.compile(r"^(.*),([0-9a-fA-F]{3})$")
-NFS_LOADEXEC_RE = re.compile(r"^(.*),([0-9a-fA-F]{8}),([0-9a-fA-F]{8})$")
+SUFFIX_FILETYPE_RE = re.compile(r"^(.*),([0-9a-fA-F]{3})$")
+SUFFIX_LOADEXEC_RE = re.compile(r"^(.*),([0-9a-fA-F]{8}),([0-9a-fA-F]{8})$")
 
 # BBC Micro to host filename character mapping
 BBC_TO_HOST = {
@@ -81,6 +83,7 @@ class MetaFormat(str, Enum):
     ACORN = "acorn"
     PIBRIDGE = "pibridge"
     XATTR = "xattr"
+    FILENAME = "filename"
 
 
 @dataclass
@@ -154,8 +157,8 @@ def parse_sparkfs_extra(extra: bytes) -> AcornMeta | None:
     return None
 
 
-def parse_nfs_filename(filename: str) -> tuple[str, AcornMeta | None]:
-    """Parse NFS-encoded metadata from a filename.
+def parse_encoded_filename(filename: str) -> tuple[str, AcornMeta | None]:
+    """Parse Unix-encoded metadata from a filename.
 
     Two forms:
         file,xxx              -> filetype xxx (3 hex digits)
@@ -163,7 +166,7 @@ def parse_nfs_filename(filename: str) -> tuple[str, AcornMeta | None]:
 
     Returns the clean filename and any extracted metadata.
     """
-    m = NFS_LOADEXEC_RE.match(filename)
+    m = SUFFIX_LOADEXEC_RE.match(filename)
     if m:
         clean = m.group(1)
         load_addr = int(m.group(2), 16)
@@ -172,7 +175,7 @@ def parse_nfs_filename(filename: str) -> tuple[str, AcornMeta | None]:
         meta.filetype = meta.infer_filetype()
         return clean, meta
 
-    m = NFS_FILETYPE_RE.match(filename)
+    m = SUFFIX_FILETYPE_RE.match(filename)
     if m:
         clean = m.group(1)
         filetype = int(m.group(2), 16)
@@ -183,26 +186,130 @@ def parse_nfs_filename(filename: str) -> tuple[str, AcornMeta | None]:
     return filename, None
 
 
+def _is_hex(s: str) -> bool:
+    """Check if a string consists entirely of hexadecimal digits."""
+    return len(s) > 0 and all(c in "0123456789abcdefABCDEF" for c in s)
+
+
+def parse_inf_line(line: str) -> tuple[str, AcornMeta] | None:
+    """Parse an INF sidecar file line, detecting the flavour.
+
+    Acorn INF:        filename load exec length [access]
+    PiEconetBridge INF:        owner load exec perm [homeof]
+
+    Returns (source_label, metadata) where source_label is "inf" for
+    Acorn or "PiEB-inf" for PiEconetBridge.
+    """
+    parts = line.split()
+    if len(parts) < 4:
+        return None
+
+    if not _is_hex(parts[0]):
+        # First field contains non-hex chars, so it must be an Acorn filename.
+        # Acorn INF: filename load exec length [access]
+        try:
+            load_addr = int(parts[1], 16)
+            exec_addr = int(parts[2], 16)
+            # parts[3] is length (informational only)
+            attr = int(parts[4], 16) if len(parts) >= 5 else None
+            meta = AcornMeta(load_addr=load_addr, exec_addr=exec_addr, attr=attr)
+            meta.filetype = meta.infer_filetype()
+            return ("inf", meta)
+        except (ValueError, IndexError):
+            return None
+
+    # All fields could be hex. Distinguish by field[3] width:
+    # Acorn length field is always 8-digit hex; PiEB perm is short (1-2 digits).
+    if len(parts[3]) == 8 and _is_hex(parts[3]):
+        # Acorn INF with a hex-only filename
+        try:
+            load_addr = int(parts[1], 16)
+            exec_addr = int(parts[2], 16)
+            attr = int(parts[4], 16) if len(parts) >= 5 else None
+            meta = AcornMeta(load_addr=load_addr, exec_addr=exec_addr, attr=attr)
+            meta.filetype = meta.infer_filetype()
+            return ("inf", meta)
+        except (ValueError, IndexError):
+            return None
+
+    # PiEconetBridge INF: owner load exec perm
+    try:
+        load_addr = int(parts[1], 16)
+        exec_addr = int(parts[2], 16)
+        perm = int(parts[3], 16)
+        meta = AcornMeta(load_addr=load_addr, exec_addr=exec_addr, attr=perm)
+        meta.filetype = meta.infer_filetype()
+        return ("PiEB-inf", meta)
+    except (ValueError, IndexError):
+        return None
+
+
+def build_inf_index(
+    zf: zipfile.ZipFile,
+) -> tuple[dict[str, tuple[str, AcornMeta]], set[str]]:
+    """Scan a ZIP for bundled .inf files and parse their metadata.
+
+    Returns (index, consumed) where:
+      - index maps data filenames to (source_label, metadata)
+      - consumed is the set of .inf ZIP member filenames that were parsed
+    """
+    names = {info.filename for info in zf.infolist()}
+    index: dict[str, tuple[str, AcornMeta]] = {}
+    consumed: set[str] = set()
+
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+        if not info.filename.lower().endswith(".inf"):
+            continue
+
+        data_filename = info.filename[:-4]
+        if data_filename not in names:
+            continue
+
+        try:
+            content = zf.read(info.filename).decode("ascii", errors="replace")
+            line = content.strip().split("\n")[0].strip()
+        except Exception:
+            continue
+
+        result = parse_inf_line(line)
+        if result is not None:
+            source_label, meta = result
+            index[data_filename] = (source_label, meta)
+            consumed.add(info.filename)
+
+    return index, consumed
+
+
 def resolve_metadata(
     info: zipfile.ZipInfo,
     *,
-    nfs_decode: bool = True,
-) -> tuple[str, str, AcornMeta | None]:
+    decode_filenames: bool = True,
+    inf_index: dict[str, tuple[str, AcornMeta]] | None = None,
+) -> tuple[str | None, str, AcornMeta | None]:
     """Extract metadata and clean filename from a ZIP entry.
 
-    Returns (original_filename, clean_filename, metadata).
+    Priority: SparkFS extra fields > bundled INF > filename encoding.
+
+    Returns (source_label, clean_filename, metadata).
     """
     original_filename = info.filename
 
     meta = parse_sparkfs_extra(info.extra)
-    metadata_source = "sparkfs" if meta else None
+    metadata_source: str | None = "sparkfs" if meta else None
 
-    clean_filename, nfs_meta = parse_nfs_filename(original_filename)
+    if meta is None and inf_index is not None:
+        inf_entry = inf_index.get(original_filename)
+        if inf_entry is not None:
+            metadata_source, meta = inf_entry
 
-    if nfs_decode and nfs_meta:
+    clean_filename, filename_meta = parse_encoded_filename(original_filename)
+
+    if decode_filenames and filename_meta:
         if meta is None:
-            meta = nfs_meta
-            metadata_source = "nfs"
+            meta = filename_meta
+            metadata_source = "filename"
         output_filename = clean_filename
     else:
         output_filename = original_filename
@@ -222,6 +329,18 @@ def format_access(attr: int | None) -> str:
     return f"{attr:02X}"
 
 
+def build_filename_suffix(meta: AcornMeta) -> str:
+    """Build a Unix filename encoding suffix for Acorn metadata.
+
+    Returns ',xxx' for filetype-stamped files, or
+    ',llllllll,eeeeeeee' for files with literal load/exec addresses.
+    """
+    if meta.is_filetype_stamped:
+        ft = meta.infer_filetype()
+        return f",{ft:03x}"
+    return f",{meta.load_addr:08x},{meta.exec_addr:08x}"
+
+
 def format_acorn_inf_line(
     filename: str,
     load_addr: int,
@@ -229,7 +348,7 @@ def format_acorn_inf_line(
     length: int,
     attr: int | None = None,
 ) -> str:
-    """Format a standard Acorn INF line.
+    """Format a Acorn INF line.
 
     Format: filename load exec length [access]
     """
@@ -316,8 +435,9 @@ def extract_member(
     *,
     verbose: bool = False,
     meta_format: MetaFormat | None = MetaFormat.ACORN,
-    nfs_decode: bool = True,
+    decode_filenames: bool = True,
     owner: int = 0,
+    inf_index: dict[str, tuple[str, AcornMeta]] | None = None,
 ) -> None:
     """Extract a single ZIP member, optionally writing metadata."""
 
@@ -329,7 +449,7 @@ def extract_member(
         return
 
     metadata_source, output_filename, meta = resolve_metadata(
-        info, nfs_decode=nfs_decode
+        info, decode_filenames=decode_filenames, inf_index=inf_index
     )
 
     output_filepath = sanitise_extract_path(output_dirpath, output_filename)
@@ -362,6 +482,16 @@ def extract_member(
         if verbose:
             rel = output_filepath.relative_to(output_dirpath)
             click.echo(f"    xattr: {rel}")
+    elif meta_format == MetaFormat.FILENAME:
+        suffix = build_filename_suffix(meta)
+        if not output_filepath.name.endswith(suffix):
+            encoded_filepath = output_filepath.with_name(
+                output_filepath.name + suffix
+            )
+            output_filepath.rename(encoded_filepath)
+            if verbose:
+                rel = encoded_filepath.relative_to(output_dirpath)
+                click.echo(f"    renamed: {rel}")
     else:
         leaf_name = output_filepath.name
 
@@ -414,14 +544,14 @@ def cli() -> None:
 @click.option("-v", "--verbose", is_flag=True, help="Show extraction progress.")
 @click.option(
     "--meta-format",
-    type=click.Choice(["acorn", "pibridge", "xattr", "none"], case_sensitive=False),
+    type=click.Choice(["acorn", "pibridge", "xattr", "filename", "none"], case_sensitive=False),
     default="acorn",
-    help="Metadata format: acorn INF (standard), pibridge INF, xattr (extended attributes), or none.",
+    help="Metadata format: acorn INF, pibridge INF, xattr, filename encoding, or none.",
 )
 @click.option(
-    "--no-nfs",
+    "--no-decode-filenames",
     is_flag=True,
-    help="Do not decode NFS filename encoding (,xxx or ,load,exec suffixes).",
+    help="Do not decode metadata from filename suffixes (,xxx or ,load,exec).",
 )
 @click.option(
     "--owner",
@@ -434,7 +564,7 @@ def extract(
     output_dir: Path | None,
     verbose: bool,
     meta_format: str,
-    no_nfs: bool,
+    no_decode_filenames: bool,
     owner: int,
 ) -> None:
     """Extract a ZIP file, preserving Acorn metadata."""
@@ -457,15 +587,25 @@ def extract(
         click.echo(f"Extracting {zipfile_path.name} -> {output_dir}")
 
     with zipfile.ZipFile(zipfile_path, "r") as zf:
+        if resolved_meta_format is not None:
+            inf_index, consumed_inf_filenames = build_inf_index(zf)
+        else:
+            inf_index, consumed_inf_filenames = None, set()
+
         for info in zf.infolist():
+            if info.filename in consumed_inf_filenames:
+                if verbose:
+                    click.echo(f"  skip: {info.filename} (metadata consumed)")
+                continue
             extract_member(
                 zf,
                 info,
                 output_dir,
                 verbose=verbose,
                 meta_format=resolved_meta_format,
-                nfs_decode=not no_nfs,
+                decode_filenames=not no_decode_filenames,
                 owner=owner,
+                inf_index=inf_index,
             )
 
 
@@ -489,12 +629,18 @@ def list_cmd(zipfile_path: Path) -> None:
     table.add_column("Source", style="dim")
 
     with zipfile.ZipFile(zipfile_path, "r") as zf:
+        inf_index, consumed_inf_filenames = build_inf_index(zf)
+
         for info in zf.infolist():
+            if info.filename in consumed_inf_filenames:
+                continue
             if info.is_dir():
                 table.add_row(info.filename, "", "", "", "", "", "dir")
                 continue
 
-            metadata_source, clean_name, meta = resolve_metadata(info)
+            metadata_source, clean_name, meta = resolve_metadata(
+                info, inf_index=inf_index
+            )
 
             if meta and meta.has_metadata:
                 ft = meta.infer_filetype()
@@ -534,25 +680,37 @@ def info(zipfile_path: Path) -> None:
         raise click.ClickException(f"{zipfile_path} is not a valid ZIP file")
 
     with zipfile.ZipFile(zipfile_path, "r") as zf:
+        inf_index, consumed_inf_filenames = build_inf_index(zf)
+
         total = 0
         dirs = 0
         sparkfs_count = 0
-        nfs_count = 0
+        inf_count = 0
+        pieb_inf_count = 0
+        filename_count = 0
         plain_count = 0
         filetypes: dict[int, int] = {}
 
         for entry in zf.infolist():
+            if entry.filename in consumed_inf_filenames:
+                continue
             if entry.is_dir():
                 dirs += 1
                 continue
 
             total += 1
-            metadata_source, _, meta = resolve_metadata(entry)
+            metadata_source, _, meta = resolve_metadata(
+                entry, inf_index=inf_index
+            )
 
             if metadata_source == "sparkfs":
                 sparkfs_count += 1
-            elif metadata_source == "nfs":
-                nfs_count += 1
+            elif metadata_source == "inf":
+                inf_count += 1
+            elif metadata_source == "PiEB-inf":
+                pieb_inf_count += 1
+            elif metadata_source == "filename":
+                filename_count += 1
             else:
                 plain_count += 1
 
@@ -565,7 +723,9 @@ def info(zipfile_path: Path) -> None:
         click.echo(f"Files:      {total}")
         click.echo(f"Dirs:       {dirs}")
         click.echo(f"SparkFS:    {sparkfs_count} files with ARC0 extra fields")
-        click.echo(f"NFS:        {nfs_count} files with NFS-encoded filenames")
+        click.echo(f"INF:        {inf_count} files with bundled Acorn INF")
+        click.echo(f"PiEB-inf:   {pieb_inf_count} files with bundled PiEconetBridge INF")
+        click.echo(f"Filename:   {filename_count} files with encoded filenames")
         click.echo(f"Plain:      {plain_count} files without Acorn metadata")
 
         if filetypes:

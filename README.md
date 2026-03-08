@@ -6,7 +6,7 @@ A standalone Python script for extracting ZIP files containing
 Standard unzip tools silently discard the load addresses, execution addresses,
 and file attributes that Acorn systems (BBC Micro, Master, Archimedes, RISC OS
 machines) store in ZIP archives. nutzip preserves this metadata, writing it out
-in your choice of three formats.
+in your choice of four formats.
 
 ## The problem
 
@@ -16,7 +16,9 @@ that non-Acorn unzip tools ignore:
 
 - **SparkFS extra fields** in the ZIP structure itself, carrying load/exec
   addresses and RISC OS file attributes.
-- **NFS filename encoding**, where metadata is appended to filenames as comma-
+- **Bundled INF sidecar files** inside the archive, in either Acorn
+  or PiEconetBridge format.
+- **Unix filename encoding**, where metadata is appended to filenames as comma-
   separated hex suffixes.
 
 Extracting these archives with `unzip` or Python's `zipfile` module on Linux or
@@ -25,13 +27,13 @@ ARM executables, this means you no longer know where in memory a program should
 be loaded or where execution should begin. For a PiEconetBridge fileserver, the
 files become unserviceable without their attributes.
 
-nutzip reads both metadata sources from the ZIP and writes them out in a format
-your target system can consume.
+nutzip reads all three metadata sources from the ZIP and writes them out in a
+format your target system can consume.
 
 ## Prerequisites
 
-nutzip requires only [`uv`](https://docs.astral.sh/uv/) and a Python 3.10+
-installation. `uv` handles dependency resolution and virtual environments
+nutzip requires only [`uv`](https://docs.astral.sh/uv/). `uv` handles
+Python installation, dependency resolution, and virtual environments
 automatically --- you do not need to install anything else by hand.
 
 ### Installing uv
@@ -56,10 +58,6 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 See the [uv installation docs](https://docs.astral.sh/uv/getting-started/installation/)
 for other methods including pip, pipx, Cargo, Conda, Winget, and Scoop.
-
-Once `uv` is available on your PATH, nutzip is ready to run. The first
-invocation will fetch the required Python packages (`click`, `rich`, and
-`xattr`) into an isolated cache; subsequent runs start instantly.
 
 ## Usage
 
@@ -120,9 +118,10 @@ $ ./nutzip.py list NetUtils.zip
 ```
 
 The **Source** column shows where the metadata was found: `sparkfs` for
-SparkFS/ARC0 extra fields, or `nfs` for NFS-encoded filenames. The **Type**
-column shows the RISC OS filetype extracted from the load address (when the top
-12 bits are `0xFFF`).
+SparkFS/ARC0 extra fields, `inf` or `PiEB-inf` for bundled INF sidecar files,
+or `filename` for filename-encoded metadata. The **Type** column shows the
+RISC OS filetype extracted from the load address (when the top 12 bits are
+`0xFFF`).
 
 ### info --- summary statistics
 
@@ -132,7 +131,9 @@ Archive:    NetUtils.zip
 Files:      12
 Dirs:       0
 SparkFS:    12 files with ARC0 extra fields
-NFS:        0 files with NFS-encoded filenames
+INF:        0 files with bundled Acorn INF
+PiEB-inf:   0 files with bundled PiEconetBridge INF
+Filename:   0 files with encoded filenames
 Plain:      0 files without Acorn metadata
 Filetypes:  6 distinct
   F08: 1 files
@@ -155,12 +156,11 @@ Options:
   -d, --output-dir PATH           Output directory (default: ZIP filename
                                   without extension).
   -v, --verbose                   Show extraction progress.
-  --meta-format [acorn|pibridge|xattr|none]
-                                  Metadata format: acorn INF (standard),
-                                  pibridge INF, xattr (extended attributes),
-                                  or none.
-  --no-nfs                        Do not decode NFS filename encoding (,xxx or
-                                  ,load,exec suffixes).
+  --meta-format [acorn|pibridge|xattr|filename|none]
+                                  Metadata format: acorn INF, pibridge INF,
+                                  xattr, filename encoding, or none.
+  --no-decode-filenames           Do not decode metadata from filename
+                                  suffixes (,xxx or ,load,exec).
   --owner INTEGER                 Econet owner ID for PiEconetBridge INF files
                                   (default: 0 = SYST).
   --help                          Show this message and exit.
@@ -168,7 +168,7 @@ Options:
 
 nutzip supports three output metadata formats, selected with `--meta-format`.
 
-### Format 1: Standard Acorn INF (default)
+### Format 1: Acorn INF (default)
 
 ```
 ./nutzip.py extract NetUtils.zip
@@ -272,7 +272,22 @@ This is the preferred format for PiEconetBridge when the host filesystem
 supports extended attributes (ext4, XFS, HFS+, APFS). PiEconetBridge reads
 xattrs in preference to `.inf` files when both are present.
 
-### Format 4: No metadata
+### Format 4: Unix filename encoding
+
+```
+./nutzip.py extract --meta-format filename NetUtils.zip
+```
+
+Encodes metadata directly into the output filenames using comma-separated hex
+suffixes. No sidecar files are created. Filetype-stamped files get a `,xxx`
+suffix (e.g. `FILE,fdd`); files with literal load/exec addresses get
+`,llllllll,eeeeeeee` (e.g. `PROG,00001900,0000801f`).
+
+This is the most portable format --- it requires no filesystem-specific
+support and survives transfers between any systems. Files already carrying
+the correct suffix are not double-encoded.
+
+### Format 5: No metadata
 
 ```
 ./nutzip.py extract --meta-format none NetUtils.zip
@@ -283,8 +298,9 @@ Extracts files only, discarding all Acorn metadata. Equivalent to a standard
 
 ## Metadata sources in ZIP files
 
-nutzip reads Acorn metadata from two sources within ZIP archives. When both are
-present for a given entry, SparkFS extra fields take priority.
+nutzip reads Acorn metadata from three sources within ZIP archives. When
+multiple sources are present for a given entry, they are used in priority order:
+SparkFS extra fields, then bundled INF sidecar files, then filename encoding.
 
 ### SparkFS extra fields (ARC0)
 
@@ -307,19 +323,48 @@ by [David Pilling](http://www.davidpilling.com/wiki/index.php/SparkFS):
 This is the most reliable metadata source, as it is embedded in the ZIP
 structure itself and survives transfers between any systems.
 
+### Bundled INF sidecar files
+
+Some ZIP archives include `.inf` sidecar files alongside the data files they
+describe. nutzip detects and parses these automatically, supporting both
+flavours:
+
+- **Acorn INF** (`filename load exec length [access]`) --- reported
+  as source `inf` in the list and info commands.
+- **PiEconetBridge INF** (`owner load exec perm`) --- reported as source
+  `PiEB-inf`.
+
+When extracting, bundled `.inf` files are consumed as a metadata source rather
+than extracted as separate files. The metadata is then written in whatever
+output format was requested (Acorn INF, PiEconetBridge INF, or xattr). This
+allows, for example, converting a PiEconetBridge archive to xattr format in a
+single step.
+
+With `--meta-format none`, bundled `.inf` files are extracted as-is (no
+metadata is consumed).
+
 ### Unix filename encoding
 
 Because Unix filesystems have no way to store Acorn load/exec addresses
-natively, a convention exists for encoding this metadata into the filename
-itself using comma-separated hex suffixes:
+natively, a [convention](https://www.riscos.info/index.php/RISC_OS_Filename_Translation)
+exists for encoding the RISC OS filetype into the filename itself as a
+comma-separated hex suffix:
 
 | Pattern                         | Example                    | Meaning                     |
 |---------------------------------|----------------------------|-----------------------------|
 | `filename,xxx`                  | `HELLO,ffb`                | RISC OS filetype `FFB`      |
+
+nutzip also supports a second form, as implemented by
+[python-zipinfo-riscos](https://github.com/gerph/python-zipinfo-riscos),
+which encodes full load and exec addresses for files that are not
+filetype-stamped:
+
+| Pattern                         | Example                    | Meaning                     |
+|---------------------------------|----------------------------|-----------------------------|
 | `filename,llllllll,eeeeeeee`    | `PROG,ffff0e10,0000801f`   | Load and exec addresses     |
 
 nutzip strips these suffixes from output filenames during extraction.
-Use `--no-nfs` to preserve the encoded filenames as-is.
+Use `--no-decode-filenames` to preserve the encoded filenames as-is.
 
 ## RISC OS filetype encoding
 
@@ -388,13 +433,17 @@ including integration tests against three real-world ZIP fixtures:
 ### Metadata format specifications
 
 - [INF file format](https://beebwiki.mdfs.net/INF_file_format) ---
-  BeebWiki specification for the standard Acorn `.inf` sidecar format.
+  BeebWiki specification for the Acorn `.inf` sidecar format.
 - [ZIP extra field registry](https://libzip.org/specifications/extrafld.txt) ---
   Known ZIP extra field types, including the Acorn/SparkFS entry (`0x4341`).
 - [RISC OS filetype](http://justsolve.archiveteam.org/wiki/RISC_OS_filetype) ---
   How RISC OS encodes filetypes in load addresses.
 - [ZipToInf documentation](https://mdfs.net/Apps/Archivers/ZipTools/ZipToInf.txt) ---
   J.G.Harston's ZipToInf utility and INF format description.
+- [RISC OS filename translation](https://www.riscos.info/index.php/RISC_OS_Filename_Translation) ---
+  Documents the `,xxx` filetype suffix convention used on Unix filesystems.
+- [INF file format](https://mdfs.net/Docs/Comp/BBC/FileFormat/INFfile) ---
+  J.G.Harston's detailed INF file format specification.
 
 ### Tools and related projects
 
@@ -402,7 +451,8 @@ including integration tests against three real-world ZIP fixtures:
   Econet bridge for Raspberry Pi; defines the `user.econet_*` xattr convention
   and the alternative `.inf` format (`owner load exec perm`).
 - [python-zipinfo-riscos](https://github.com/gerph/python-zipinfo-riscos) ---
-  Python library for reading/writing RISC OS extra fields in ZIP archives.
+  Python library for reading/writing RISC OS extra fields in ZIP archives;
+  source of the `,llllllll,eeeeeeee` load/exec filename encoding convention.
 - [ZipTools](https://mdfs.net/Apps/Archivers/ZipTools/) ---
   J.G.Harston's suite of Acorn-aware ZIP utilities including ZipToInf.
 - [SparkFS](http://www.davidpilling.com/wiki/index.php/SparkFS) ---

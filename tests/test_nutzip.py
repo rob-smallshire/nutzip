@@ -25,8 +25,11 @@ _spec.loader.exec_module(nutzip)
 AcornMeta = nutzip.AcornMeta
 MetaFormat = nutzip.MetaFormat
 parse_sparkfs_extra = nutzip.parse_sparkfs_extra
-parse_nfs_filename = nutzip.parse_nfs_filename
+parse_encoded_filename = nutzip.parse_encoded_filename
+parse_inf_line = nutzip.parse_inf_line
+build_inf_index = nutzip.build_inf_index
 resolve_metadata = nutzip.resolve_metadata
+build_filename_suffix = nutzip.build_filename_suffix
 format_acorn_inf_line = nutzip.format_acorn_inf_line
 format_pibridge_inf_line = nutzip.format_pibridge_inf_line
 format_access = nutzip.format_access
@@ -240,78 +243,78 @@ class TestParseSparkfsExtra:
 
 
 # =========================================================================
-# NFS filename parsing
+# Encoded filename parsing
 # =========================================================================
 
 
-class TestParseNfsFilename:
+class TestParseEncodedFilename:
     def test_filetype_suffix(self):
-        clean, meta = parse_nfs_filename("HELLO,ffb")
+        clean, meta = parse_encoded_filename("HELLO,ffb")
         assert clean == "HELLO"
         assert meta is not None
         assert meta.filetype == 0xFFB
         assert meta.is_filetype_stamped is True
 
     def test_filetype_uppercase(self):
-        clean, meta = parse_nfs_filename("README,FFF")
+        clean, meta = parse_encoded_filename("README,FFF")
         assert clean == "README"
         assert meta.filetype == 0xFFF
 
     def test_filetype_mixed_case(self):
-        clean, meta = parse_nfs_filename("File,fFb")
+        clean, meta = parse_encoded_filename("File,fFb")
         assert clean == "File"
         assert meta.filetype == 0xFFB
 
     def test_load_exec_suffix(self):
-        clean, meta = parse_nfs_filename("PROG,ffff0e10,0000801f")
+        clean, meta = parse_encoded_filename("PROG,ffff0e10,0000801f")
         assert clean == "PROG"
         assert meta is not None
         assert meta.load_addr == 0xFFFF0E10
         assert meta.exec_addr == 0x0000801F
 
     def test_load_exec_uppercase(self):
-        clean, meta = parse_nfs_filename("PROG,FFFF0E10,0000801F")
+        clean, meta = parse_encoded_filename("PROG,FFFF0E10,0000801F")
         assert clean == "PROG"
         assert meta.load_addr == 0xFFFF0E10
         assert meta.exec_addr == 0x0000801F
 
     def test_plain_filename_no_comma(self):
-        clean, meta = parse_nfs_filename("README")
+        clean, meta = parse_encoded_filename("README")
         assert clean == "README"
         assert meta is None
 
     def test_plain_filename_with_non_hex_suffix(self):
-        clean, meta = parse_nfs_filename("notes,txt")
+        clean, meta = parse_encoded_filename("notes,txt")
         assert clean == "notes,txt"
         assert meta is None
 
     def test_filetype_too_short(self):
-        clean, meta = parse_nfs_filename("file,ff")
+        clean, meta = parse_encoded_filename("file,ff")
         assert clean == "file,ff"
         assert meta is None
 
     def test_filetype_too_long(self):
-        clean, meta = parse_nfs_filename("file,ffff")
+        clean, meta = parse_encoded_filename("file,ffff")
         assert clean == "file,ffff"
         assert meta is None
 
     def test_load_exec_too_short(self):
-        clean, meta = parse_nfs_filename("file,ffff0e1,0000801f")
+        clean, meta = parse_encoded_filename("file,ffff0e1,0000801f")
         assert clean == "file,ffff0e1,0000801f"
         assert meta is None
 
     def test_path_with_directories(self):
-        clean, meta = parse_nfs_filename("dir/subdir/FILE,ffb")
+        clean, meta = parse_encoded_filename("dir/subdir/FILE,ffb")
         assert clean == "dir/subdir/FILE"
         assert meta.filetype == 0xFFB
 
     def test_path_with_load_exec(self):
-        clean, meta = parse_nfs_filename("path/to/PROG,ffff0e10,0000801f")
+        clean, meta = parse_encoded_filename("path/to/PROG,ffff0e10,0000801f")
         assert clean == "path/to/PROG"
         assert meta.load_addr == 0xFFFF0E10
 
     def test_filetype_synthesises_load_addr(self):
-        _, meta = parse_nfs_filename("FILE,f0e")
+        _, meta = parse_encoded_filename("FILE,f0e")
         # 0xFFF00000 | (0xF0E << 8) = 0xFFFF0E00
         assert meta.load_addr == 0xFFFF0E00
         assert meta.exec_addr == 0
@@ -319,12 +322,190 @@ class TestParseNfsFilename:
         assert meta.infer_filetype() == 0xF0E
 
     def test_load_exec_with_filetype_in_load(self):
-        _, meta = parse_nfs_filename("FILE,ffff0e10,ffff0e10")
+        _, meta = parse_encoded_filename("FILE,ffff0e10,ffff0e10")
         assert meta.infer_filetype() == 0xF0E
 
     def test_load_exec_without_filetype_in_load(self):
-        _, meta = parse_nfs_filename("FILE,00001900,0000801f")
+        _, meta = parse_encoded_filename("FILE,00001900,0000801f")
         assert meta.infer_filetype() is None
+
+
+# =========================================================================
+# INF line parsing
+# =========================================================================
+
+
+class TestParseInfLine:
+    def test_acorn_inf_with_access(self):
+        result = parse_inf_line("SetStation  FFFFDD00 FFFFDD00 000002E3 03")
+        assert result is not None
+        source, meta = result
+        assert source == "inf"
+        assert meta.load_addr == 0xFFFFDD00
+        assert meta.exec_addr == 0xFFFFDD00
+        assert meta.attr == 0x03
+
+    def test_acorn_inf_without_access(self):
+        result = parse_inf_line("README      FFFFF004 FFFFF004 00000100")
+        assert result is not None
+        source, meta = result
+        assert source == "inf"
+        assert meta.load_addr == 0xFFFFF004
+        assert meta.attr is None
+
+    def test_pieb_inf(self):
+        result = parse_inf_line("0 fffff93a c7524201 33")
+        assert result is not None
+        source, meta = result
+        assert source == "PiEB-inf"
+        assert meta.load_addr == 0xFFFFF93A
+        assert meta.exec_addr == 0xC7524201
+        assert meta.attr == 0x33
+
+    def test_pieb_inf_zero_owner(self):
+        result = parse_inf_line("0 ffffdd00 ffffdd00 3")
+        assert result is not None
+        source, meta = result
+        assert source == "PiEB-inf"
+        assert meta.load_addr == 0xFFFFDD00
+
+    def test_acorn_inf_hex_filename(self):
+        # A filename like "FF" is valid hex but should be detected as Acorn
+        # when field[3] is 8 digits (the length field)
+        result = parse_inf_line("FF          FFFFDD00 FFFFDD00 00000010 03")
+        assert result is not None
+        source, meta = result
+        assert source == "inf"
+        assert meta.load_addr == 0xFFFFDD00
+
+    def test_too_few_fields(self):
+        assert parse_inf_line("only three fields") is None
+        assert parse_inf_line("a b c") is None
+
+    def test_empty_line(self):
+        assert parse_inf_line("") is None
+
+    def test_invalid_hex(self):
+        assert parse_inf_line("FILE ZZZZ0000 00000000 00000010") is None
+
+    def test_filetype_inferred(self):
+        result = parse_inf_line("0 ffffdd00 ffffdd00 3")
+        assert result is not None
+        _, meta = result
+        assert meta.filetype == 0xFDD
+
+    def test_pieb_inf_with_homeof(self):
+        result = parse_inf_line("0 fffff93a c7524201 33 0")
+        assert result is not None
+        source, meta = result
+        assert source == "PiEB-inf"
+
+
+class TestBuildInfIndex:
+    def _make_zip_with_inf(self, tmp_path, entries):
+        """Create a ZIP with data files and companion .inf files.
+
+        entries is a list of (filename, data, inf_content) tuples.
+        If inf_content is None, no .inf file is created.
+        """
+        zip_filepath = tmp_path / "test.zip"
+        with zipfile.ZipFile(zip_filepath, "w") as zf:
+            for filename, data, inf_content in entries:
+                zf.writestr(filename, data)
+                if inf_content is not None:
+                    zf.writestr(filename + ".inf", inf_content)
+        return zip_filepath
+
+    def test_pieb_inf_detected(self, tmp_path):
+        zip_filepath = self._make_zip_with_inf(
+            tmp_path, [("FILE", b"\x00" * 8, "0 ffffdd00 ffffdd00 3")]
+        )
+        with zipfile.ZipFile(zip_filepath) as zf:
+            index, consumed = build_inf_index(zf)
+        assert "FILE" in index
+        source, meta = index["FILE"]
+        assert source == "PiEB-inf"
+        assert meta.load_addr == 0xFFFFDD00
+        assert "FILE.inf" in consumed
+
+    def test_acorn_inf_detected(self, tmp_path):
+        zip_filepath = self._make_zip_with_inf(
+            tmp_path,
+            [("PROG", b"\x00" * 16, "PROG        FFFF0E10 FFFF0E10 00000010 03")],
+        )
+        with zipfile.ZipFile(zip_filepath) as zf:
+            index, consumed = build_inf_index(zf)
+        assert "PROG" in index
+        source, meta = index["PROG"]
+        assert source == "inf"
+        assert meta.load_addr == 0xFFFF0E10
+        assert meta.attr == 0x03
+
+    def test_orphan_inf_not_consumed(self, tmp_path):
+        """An .inf with no corresponding data file is not consumed."""
+        zip_filepath = tmp_path / "test.zip"
+        with zipfile.ZipFile(zip_filepath, "w") as zf:
+            zf.writestr("ORPHAN.inf", "0 ffffdd00 ffffdd00 3")
+        with zipfile.ZipFile(zip_filepath) as zf:
+            index, consumed = build_inf_index(zf)
+        assert len(index) == 0
+        assert len(consumed) == 0
+
+    def test_unparseable_inf_not_consumed(self, tmp_path):
+        zip_filepath = self._make_zip_with_inf(
+            tmp_path, [("FILE", b"\x00", "not valid inf content")]
+        )
+        with zipfile.ZipFile(zip_filepath) as zf:
+            index, consumed = build_inf_index(zf)
+        assert len(index) == 0
+        assert len(consumed) == 0
+
+    def test_nested_path(self, tmp_path):
+        zip_filepath = self._make_zip_with_inf(
+            tmp_path,
+            [("Library/FILE", b"\x00" * 8, "0 ffffdd00 ffffdd00 3")],
+        )
+        with zipfile.ZipFile(zip_filepath) as zf:
+            index, consumed = build_inf_index(zf)
+        assert "Library/FILE" in index
+        assert "Library/FILE.inf" in consumed
+
+
+# =========================================================================
+# resolve_metadata with INF index
+# =========================================================================
+
+
+class TestResolveMetadataWithInf:
+    def _make_info(
+        self, filename: str, extra: bytes = b"", file_size: int = 100
+    ) -> zipfile.ZipInfo:
+        info = zipfile.ZipInfo(filename)
+        info.extra = extra
+        info.file_size = file_size
+        return info
+
+    def test_inf_used_when_no_sparkfs(self):
+        info = self._make_info("FILE")
+        inf_index = {"FILE": ("PiEB-inf", AcornMeta(load_addr=0xFFFFDD00, exec_addr=0xFFFFDD00, attr=3))}
+        source, clean, meta = resolve_metadata(info, inf_index=inf_index)
+        assert source == "PiEB-inf"
+        assert meta.load_addr == 0xFFFFDD00
+
+    def test_sparkfs_beats_inf(self):
+        extra = build_sparkfs_extra(0xFFFF0E10, 0xFFFF0E10, 0x03)
+        info = self._make_info("FILE", extra=extra)
+        inf_index = {"FILE": ("PiEB-inf", AcornMeta(load_addr=0xFFFFDD00, exec_addr=0xFFFFDD00, attr=3))}
+        source, clean, meta = resolve_metadata(info, inf_index=inf_index)
+        assert source == "sparkfs"
+        assert meta.load_addr == 0xFFFF0E10
+
+    def test_inf_beats_filename_encoding(self):
+        info = self._make_info("FILE,ffb")
+        inf_index = {"FILE,ffb": ("inf", AcornMeta(load_addr=0xFFFF0E10, exec_addr=0xFFFF0E10, attr=3))}
+        source, clean, meta = resolve_metadata(info, inf_index=inf_index)
+        assert source == "inf"
+        assert meta.load_addr == 0xFFFF0E10
 
 
 # =========================================================================
@@ -341,19 +522,19 @@ class TestResolveMetadata:
         info.file_size = file_size
         return info
 
-    def test_sparkfs_preferred_over_nfs(self):
+    def test_sparkfs_preferred_over_filename(self):
         extra = build_sparkfs_extra(0xFFFF0E10, 0xFFFF0E10, 0x03)
         info = self._make_info("FILE,ffb", extra=extra)
         source, clean, meta = resolve_metadata(info)
         assert source == "sparkfs"
-        # NFS still strips the suffix from filename
+        # Encoded suffix still stripped from filename
         assert clean == "FILE"
         assert meta.load_addr == 0xFFFF0E10
 
-    def test_nfs_when_no_sparkfs(self):
+    def test_filename_when_no_sparkfs(self):
         info = self._make_info("FILE,ffb")
         source, clean, meta = resolve_metadata(info)
-        assert source == "nfs"
+        assert source == "filename"
         assert clean == "FILE"
         assert meta.filetype == 0xFFB
 
@@ -364,19 +545,19 @@ class TestResolveMetadata:
         assert clean == "README"
         assert meta is None
 
-    def test_nfs_decode_disabled(self):
+    def test_decode_filenames_disabled(self):
         info = self._make_info("FILE,ffb")
-        source, clean, meta = resolve_metadata(info, nfs_decode=False)
+        source, clean, meta = resolve_metadata(info, decode_filenames=False)
         assert source is None
         assert clean == "FILE,ffb"
         assert meta is None
 
-    def test_sparkfs_still_works_when_nfs_disabled(self):
+    def test_sparkfs_still_works_when_decode_disabled(self):
         extra = build_sparkfs_extra(0xFFFF0E10, 0xFFFF0E10, 0x03)
         info = self._make_info("FILE,ffb", extra=extra)
-        source, clean, meta = resolve_metadata(info, nfs_decode=False)
+        source, clean, meta = resolve_metadata(info, decode_filenames=False)
         assert source == "sparkfs"
-        assert clean == "FILE,ffb"  # NFS suffix preserved
+        assert clean == "FILE,ffb"  # Encoded suffix preserved
         assert meta.load_addr == 0xFFFF0E10
 
 
@@ -693,7 +874,7 @@ class TestNetUtilsZip:
         assert result.exit_code == 0
         assert "Files:      12" in result.output
         assert "SparkFS:    12" in result.output
-        assert "NFS:        0" in result.output
+        assert "Filename:   0" in result.output
         assert "Plain:      0" in result.output
 
 
@@ -852,7 +1033,7 @@ class TestExtractMember:
         assert x.get("user.econet_perm") == b"03"
         assert x.get("user.econet_owner") == b"0005"
 
-    def test_nfs_filename_cleaned(self, tmp_path):
+    def test_encoded_filename_cleaned(self, tmp_path):
         data = b"\x01" * 32
         zip_filepath = make_zip_file(tmp_path, [("FILE,ffb", data, None)])
         with zipfile.ZipFile(zip_filepath) as zf:
@@ -861,13 +1042,13 @@ class TestExtractMember:
         assert (tmp_path / "out" / "FILE").is_file()
         assert not (tmp_path / "out" / "FILE,ffb").exists()
 
-    def test_nfs_decode_disabled_preserves_name(self, tmp_path):
+    def test_decode_disabled_preserves_name(self, tmp_path):
         data = b"\x01" * 32
         zip_filepath = make_zip_file(tmp_path, [("FILE,ffb", data, None)])
         with zipfile.ZipFile(zip_filepath) as zf:
             info = zf.infolist()[0]
             extract_member(
-                zf, info, tmp_path / "out", nfs_decode=False, meta_format=None
+                zf, info, tmp_path / "out", decode_filenames=False, meta_format=None
             )
         assert (tmp_path / "out" / "FILE,ffb").is_file()
         assert not (tmp_path / "out" / "FILE").exists()
@@ -892,7 +1073,7 @@ class TestExtractMember:
             extract_member(zf, info, tmp_path / "out")
         assert (tmp_path / "out" / "Library" / "Subdir" / "FILE").is_file()
 
-    def test_nfs_load_exec_inf(self, tmp_path):
+    def test_encoded_load_exec_inf(self, tmp_path):
         data = b"\x00" * 16
         zip_filepath = make_zip_file(
             tmp_path, [("PROG,ffff0e10,0000801f", data, None)]
@@ -1036,7 +1217,7 @@ class TestCliList:
         assert "sparkfs" in result.output
         assert "README" in result.output
 
-    def test_list_nfs(self, tmp_path):
+    def test_list_filename_source(self, tmp_path):
         zip_filepath = make_zip_file(
             tmp_path, [("FILE,ffb", b"\x00" * 8, None)]
         )
@@ -1044,7 +1225,7 @@ class TestCliList:
         result = runner.invoke(cli, ["list", str(zip_filepath)])
         assert result.exit_code == 0
         assert "FILE" in result.output
-        assert "nfs" in result.output
+        assert "filename" in result.output
 
     def test_list_directory(self, tmp_path):
         zip_filepath = make_zip_file(tmp_path, [("subdir/", b"", None)])
@@ -1080,7 +1261,7 @@ class TestCliInfo:
         assert "Files:      3" in result.output
         assert "Dirs:       1" in result.output
         assert "SparkFS:    1" in result.output
-        assert "NFS:        1" in result.output
+        assert "Filename:   1" in result.output
         assert "Plain:      1" in result.output
 
     def test_info_filetypes(self, tmp_path):
@@ -1103,6 +1284,269 @@ class TestCliVersion:
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
         assert "0.1.0" in result.output
+
+
+# =========================================================================
+# Bundled INF CLI tests
+# =========================================================================
+
+
+def _make_zip_with_inf(tmp_path, entries, name="test.zip"):
+    """Create a ZIP with data files and optional companion .inf files.
+
+    entries is a list of (filename, data, inf_content_or_None) tuples.
+    """
+    zip_filepath = tmp_path / name
+    with zipfile.ZipFile(zip_filepath, "w") as zf:
+        for filename, data, inf_content in entries:
+            zf.writestr(filename, data)
+            if inf_content is not None:
+                zf.writestr(filename + ".inf", inf_content)
+    return zip_filepath
+
+
+class TestCliBundledInf:
+    def test_extract_pieb_inf_creates_acorn_inf(self, tmp_path):
+        """Bundled PiEB .inf is consumed and rewritten as Acorn INF."""
+        zip_filepath = _make_zip_with_inf(
+            tmp_path, [("FILE", b"\x00" * 8, "0 ffffdd00 ffffdd00 3")]
+        )
+        out = tmp_path / "out"
+        runner = CliRunner()
+        result = runner.invoke(cli, ["extract", str(zip_filepath), "-d", str(out)])
+        assert result.exit_code == 0
+        assert (out / "FILE").is_file()
+        assert (out / "FILE.inf").is_file()
+        inf = (out / "FILE.inf").read_text().strip()
+        assert "FFFFDD00" in inf
+        # The bundled PiEB .inf should NOT be extracted as a separate file
+        # (it would conflict with the rewritten Acorn .inf)
+
+    def test_extract_pieb_inf_as_xattr(self, tmp_path):
+        """Bundled PiEB .inf is consumed and written as xattrs."""
+        import xattr as xattr_mod
+
+        zip_filepath = _make_zip_with_inf(
+            tmp_path, [("FILE", b"\x00" * 8, "0 ffffdd00 ffffdd00 3")]
+        )
+        out = tmp_path / "out"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["extract", "--meta-format", "xattr", str(zip_filepath), "-d", str(out)],
+        )
+        assert result.exit_code == 0
+        assert (out / "FILE").is_file()
+        x = xattr_mod.xattr(str(out / "FILE"))
+        assert x.get("user.econet_load") == b"FFFFDD00"
+        assert x.get("user.econet_exec") == b"FFFFDD00"
+        # No .inf file should exist
+        assert not (out / "FILE.inf").exists()
+
+    def test_extract_none_preserves_inf(self, tmp_path):
+        """With --meta-format none, bundled .inf files are extracted as-is."""
+        zip_filepath = _make_zip_with_inf(
+            tmp_path, [("FILE", b"\x00" * 8, "0 ffffdd00 ffffdd00 3")]
+        )
+        out = tmp_path / "out"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["extract", "--meta-format", "none", str(zip_filepath), "-d", str(out)],
+        )
+        assert result.exit_code == 0
+        assert (out / "FILE").is_file()
+        assert (out / "FILE.inf").is_file()
+        inf = (out / "FILE.inf").read_text().strip()
+        assert inf == "0 ffffdd00 ffffdd00 3"
+
+    def test_list_shows_pieb_inf_source(self, tmp_path):
+        zip_filepath = _make_zip_with_inf(
+            tmp_path, [("FILE", b"\x00" * 8, "0 ffffdd00 ffffdd00 3")]
+        )
+        runner = CliRunner()
+        result = runner.invoke(cli, ["list", str(zip_filepath)])
+        assert result.exit_code == 0
+        assert "FILE" in result.output
+        assert "PiEB-inf" in result.output
+        # The .inf file itself should not appear in the listing
+        assert "FILE.inf" not in result.output
+
+    def test_list_shows_acorn_inf_source(self, tmp_path):
+        zip_filepath = _make_zip_with_inf(
+            tmp_path,
+            [("PROG", b"\x00" * 16, "PROG        FFFF0E10 FFFF0E10 00000010 03")],
+        )
+        runner = CliRunner()
+        result = runner.invoke(cli, ["list", str(zip_filepath)])
+        assert result.exit_code == 0
+        assert "PROG" in result.output
+        assert "inf" in result.output
+
+    def test_info_counts_pieb_inf(self, tmp_path):
+        zip_filepath = _make_zip_with_inf(
+            tmp_path,
+            [
+                ("FILE1", b"\x00" * 8, "0 ffffdd00 ffffdd00 3"),
+                ("FILE2", b"\x00" * 4, "0 fffff93a c7524201 33"),
+                ("PLAIN", b"text", None),
+            ],
+        )
+        runner = CliRunner()
+        result = runner.invoke(cli, ["info", str(zip_filepath)])
+        assert result.exit_code == 0
+        assert "Files:      3" in result.output
+        assert "PiEB-inf:   2" in result.output
+        assert "Plain:      1" in result.output
+
+    def test_info_counts_acorn_inf(self, tmp_path):
+        zip_filepath = _make_zip_with_inf(
+            tmp_path,
+            [("PROG", b"\x00" * 16, "PROG        FFFF0E10 FFFF0E10 00000010 03")],
+        )
+        runner = CliRunner()
+        result = runner.invoke(cli, ["info", str(zip_filepath)])
+        assert result.exit_code == 0
+        assert "INF:        1" in result.output
+
+
+class TestSwehBundledInf:
+    """Tests that sweh_econet_system.zip PiEB INF files are consumed as metadata."""
+
+    def test_info_shows_pieb_inf(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["info", str(SWEH_ZIP_FILEPATH)])
+        assert result.exit_code == 0
+        assert "PiEB-inf:" in result.output
+        # Should have PiEB-inf entries, not all plain
+        pieb_line = [l for l in result.output.splitlines() if "PiEB-inf:" in l][0]
+        count = int(pieb_line.split(":")[1].strip().split()[0])
+        assert count > 0
+
+    def test_list_shows_pieb_inf_source(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["list", str(SWEH_ZIP_FILEPATH)])
+        assert result.exit_code == 0
+        assert "PiEB-inf" in result.output
+
+    def test_extract_xattr_no_inf_files(self, tmp_path):
+        """Extracting with xattr format should consume .inf files."""
+        out = tmp_path / "out"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["extract", "--meta-format", "xattr", str(SWEH_ZIP_FILEPATH), "-d", str(out)],
+        )
+        assert result.exit_code == 0
+        # Check that at least one file has xattrs
+        import xattr as xattr_mod
+        library_dirpath = out / "Library"
+        if library_dirpath.is_dir():
+            for filepath in library_dirpath.iterdir():
+                if filepath.is_file() and not filepath.name.endswith(".inf"):
+                    x = xattr_mod.xattr(str(filepath))
+                    attrs = x.list()
+                    if attrs:
+                        assert "user.econet_load" in attrs
+                        break
+
+
+# =========================================================================
+# Filename encoding output format
+# =========================================================================
+
+
+class TestBuildFilenameSuffix:
+    def test_filetype_stamped(self):
+        meta = AcornMeta(load_addr=0xFFFFDD00, exec_addr=0xFFFFDD00, filetype=0xFDD)
+        assert build_filename_suffix(meta) == ",fdd"
+
+    def test_literal_addresses(self):
+        meta = AcornMeta(load_addr=0x00001900, exec_addr=0x0000801F)
+        assert build_filename_suffix(meta) == ",00001900,0000801f"
+
+    def test_filetype_ffb(self):
+        meta = AcornMeta(load_addr=0xFFFFB00, exec_addr=0, filetype=0xFFB)
+        meta.load_addr = 0xFFFFFB00
+        assert build_filename_suffix(meta) == ",ffb"
+
+
+class TestCliFilenameFormat:
+    def test_extract_sparkfs_as_filename(self, tmp_path):
+        """SparkFS metadata is written as filename suffix."""
+        extra = build_sparkfs_extra(0xFFFFDD00, 0xFFFFDD00, 0x03)
+        zip_filepath = make_zip_file(tmp_path, [("FILE", b"\x00" * 8, extra)])
+        out = tmp_path / "out"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["extract", "--meta-format", "filename", str(zip_filepath), "-d", str(out)],
+        )
+        assert result.exit_code == 0
+        assert (out / "FILE,fdd").is_file()
+        assert not (out / "FILE").exists()
+        assert not (out / "FILE.inf").exists()
+
+    def test_extract_literal_load_exec(self, tmp_path):
+        """Non-filetype-stamped files get ,llllllll,eeeeeeee suffix."""
+        extra = build_sparkfs_extra(0x00001900, 0x0000801F, 0x03)
+        zip_filepath = make_zip_file(tmp_path, [("PROG", b"\x00" * 8, extra)])
+        out = tmp_path / "out"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["extract", "--meta-format", "filename", str(zip_filepath), "-d", str(out)],
+        )
+        assert result.exit_code == 0
+        assert (out / "PROG,00001900,0000801f").is_file()
+        assert not (out / "PROG").exists()
+
+    def test_no_double_encoding(self, tmp_path):
+        """A file already named FILE,ffb should not become FILE,ffb,ffb."""
+        extra = build_sparkfs_extra(0xFFFFFB00, 0xFFFFFB00, 0x03)
+        zip_filepath = make_zip_file(
+            tmp_path, [("FILE,ffb", b"\x00" * 8, extra)]
+        )
+        out = tmp_path / "out"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "extract", "--meta-format", "filename",
+                "--no-decode-filenames",
+                str(zip_filepath), "-d", str(out),
+            ],
+        )
+        assert result.exit_code == 0
+        assert (out / "FILE,ffb").is_file()
+        assert not (out / "FILE,ffb,ffb").exists()
+
+    def test_pieb_inf_to_filename(self, tmp_path):
+        """Bundled PiEB INF metadata can be converted to filename encoding."""
+        zip_filepath = _make_zip_with_inf(
+            tmp_path, [("FILE", b"\x00" * 8, "0 ffffdd00 ffffdd00 3")]
+        )
+        out = tmp_path / "out"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["extract", "--meta-format", "filename", str(zip_filepath), "-d", str(out)],
+        )
+        assert result.exit_code == 0
+        assert (out / "FILE,fdd").is_file()
+        assert not (out / "FILE.inf").exists()
+
+    def test_plain_file_unchanged(self, tmp_path):
+        """Files without metadata are not renamed."""
+        zip_filepath = make_zip_file(tmp_path, [("README", b"text", None)])
+        out = tmp_path / "out"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["extract", "--meta-format", "filename", str(zip_filepath), "-d", str(out)],
+        )
+        assert result.exit_code == 0
+        assert (out / "README").is_file()
 
 
 # =========================================================================
@@ -1162,19 +1606,19 @@ class TestEdgeCases:
         assert (out / "file.dat.inf").is_file()
         assert not (out / "file.inf").exists()
 
-    def test_nfs_three_digit_filetype_zero(self):
-        clean, meta = parse_nfs_filename("FILE,000")
+    def test_three_digit_filetype_zero(self):
+        clean, meta = parse_encoded_filename("FILE,000")
         assert clean == "FILE"
         assert meta.filetype == 0
 
-    def test_nfs_load_exec_all_zeros(self):
-        clean, meta = parse_nfs_filename("FILE,00000000,00000000")
+    def test_load_exec_all_zeros(self):
+        clean, meta = parse_encoded_filename("FILE,00000000,00000000")
         assert clean == "FILE"
         assert meta.load_addr == 0
         assert meta.exec_addr == 0
 
-    def test_nfs_load_exec_all_f(self):
-        clean, meta = parse_nfs_filename("FILE,ffffffff,ffffffff")
+    def test_load_exec_all_f(self):
+        clean, meta = parse_encoded_filename("FILE,ffffffff,ffffffff")
         assert clean == "FILE"
         assert meta.load_addr == 0xFFFFFFFF
         assert meta.exec_addr == 0xFFFFFFFF
