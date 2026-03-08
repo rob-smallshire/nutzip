@@ -21,11 +21,11 @@ jobs:
 
       - name: Run tests (macOS)
         if: runner.os == 'macOS'
-        run: uv run --python ${{ matrix.python-version }} --with pytest --with xattr pytest tests/ -v
+        run: uv run --python ${{ matrix.python-version }} --with pytest --with click --with rich --with xattr pytest tests/ -v
 
       - name: Run tests (Linux/Windows)
         if: runner.os != 'macOS'
-        run: uv run --python ${{ matrix.python-version }} --with pytest pytest tests/ -v
+        run: uv run --python ${{ matrix.python-version }} --with pytest --with click --with rich pytest tests/ -v
 
   readme-check:
     runs-on: macos-latest
