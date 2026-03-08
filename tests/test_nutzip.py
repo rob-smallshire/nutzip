@@ -70,6 +70,9 @@ FIXTURES_DIRPATH = Path(__file__).resolve().parent / "fixtures"
 NETUTILS_ZIP_FILEPATH = FIXTURES_DIRPATH / "NetUtils.zip"
 NETUTILB_ZIP_FILEPATH = FIXTURES_DIRPATH / "NetUtilB.zip"
 SWEH_ZIP_FILEPATH = FIXTURES_DIRPATH / "sweh_econet_system.zip"
+MASTER_ZIP_FILEPATH = FIXTURES_DIRPATH / "MASTER.zip"
+TESTDIR_UNIX_ZIP_FILEPATH = FIXTURES_DIRPATH / "testdir-unix.zip"
+TESTDIR_RO_ZIP_FILEPATH = FIXTURES_DIRPATH / "testdir-ro.zip"
 
 
 # ---------------------------------------------------------------------------
@@ -977,6 +980,170 @@ class TestSwehEconetSystemZip:
     def test_entry_count(self):
         with zipfile.ZipFile(SWEH_ZIP_FILEPATH) as zf:
             assert len(zf.infolist()) == 140
+
+
+class TestMasterZip:
+    """Tests using MASTER.zip from mdfs.net (SparkFS, 344 files, 36 filetypes)."""
+
+    def test_fixture_exists(self):
+        assert MASTER_ZIP_FILEPATH.is_file()
+
+    def test_all_entries_have_sparkfs(self):
+        with zipfile.ZipFile(MASTER_ZIP_FILEPATH) as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                meta = parse_sparkfs_extra(info.extra)
+                assert meta is not None, f"{info.filename} missing SparkFS extra"
+
+    def test_entry_count(self):
+        with zipfile.ZipFile(MASTER_ZIP_FILEPATH) as zf:
+            files = [i for i in zf.infolist() if not i.is_dir()]
+            dirs = [i for i in zf.infolist() if i.is_dir()]
+            assert len(files) == 344
+            assert len(dirs) == 28
+
+    def test_info_command(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["info", str(MASTER_ZIP_FILEPATH)])
+        assert result.exit_code == 0
+        assert "SparkFS:    344" in result.output
+        assert "Plain:      0" in result.output
+
+    def test_filetype_diversity(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["info", str(MASTER_ZIP_FILEPATH)])
+        assert "Filetypes:  36 distinct" in result.output
+
+    def test_extract(self, tmp_path):
+        runner = CliRunner()
+        out = tmp_path / "out"
+        result = runner.invoke(
+            cli, ["extract", str(MASTER_ZIP_FILEPATH), "-d", str(out)]
+        )
+        assert result.exit_code == 0
+        # Spot-check some files exist
+        extracted_files = list(out.rglob("*"))
+        assert len([f for f in extracted_files if f.is_file()]) > 300
+
+
+class TestTestdirUnixZip:
+    """Tests using testdir-unix.zip from gerph/python-zipinfo-riscos.
+
+    Contains 4 files with Unix filename encoding (,xxx suffixes), no SparkFS.
+    """
+
+    def test_fixture_exists(self):
+        assert TESTDIR_UNIX_ZIP_FILEPATH.is_file()
+
+    def test_no_sparkfs_on_files(self):
+        with zipfile.ZipFile(TESTDIR_UNIX_ZIP_FILEPATH) as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                meta = parse_sparkfs_extra(info.extra)
+                assert meta is None, f"{info.filename} has unexpected SparkFS extra"
+
+    def test_all_files_have_filename_encoding(self):
+        with zipfile.ZipFile(TESTDIR_UNIX_ZIP_FILEPATH) as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                _, filename_meta = parse_encoded_filename(info.filename.split("/")[-1])
+                assert filename_meta is not None, f"{info.filename} has no encoding"
+
+    def test_entry_count(self):
+        with zipfile.ZipFile(TESTDIR_UNIX_ZIP_FILEPATH) as zf:
+            files = [i for i in zf.infolist() if not i.is_dir()]
+            assert len(files) == 4
+
+    def test_info_command(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["info", str(TESTDIR_UNIX_ZIP_FILEPATH)])
+        assert result.exit_code == 0
+        assert "SparkFS:    0" in result.output
+        assert "Filename:   4" in result.output
+
+    def test_list_shows_filename_source(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["list", str(TESTDIR_UNIX_ZIP_FILEPATH)])
+        assert result.exit_code == 0
+        assert "filename" in result.output
+
+    def test_filetypes(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["info", str(TESTDIR_UNIX_ZIP_FILEPATH)])
+        assert "Filetypes:  4 distinct" in result.output
+        assert "FFB:" in result.output
+        assert "FFF:" in result.output
+        assert "FFD:" in result.output
+        assert "FF8:" in result.output
+
+    def test_extract_strips_suffixes(self, tmp_path):
+        runner = CliRunner()
+        out = tmp_path / "out"
+        result = runner.invoke(
+            cli, ["extract", str(TESTDIR_UNIX_ZIP_FILEPATH), "-d", str(out)]
+        )
+        assert result.exit_code == 0
+        testdir = out / "testdir"
+        # Filenames should have ,xxx suffixes stripped
+        assert (testdir / "text").is_file()
+        assert (testdir / "swic").is_file()
+        assert not (testdir / "text,fff").exists()
+        assert not (testdir / "swic,ffb").exists()
+        # INF files should be created
+        assert (testdir / "text.inf").is_file()
+        assert (testdir / "swic.inf").is_file()
+
+    def test_extract_no_decode_preserves_suffixes(self, tmp_path):
+        runner = CliRunner()
+        out = tmp_path / "out"
+        result = runner.invoke(
+            cli,
+            [
+                "extract", "--no-decode-filenames",
+                str(TESTDIR_UNIX_ZIP_FILEPATH), "-d", str(out),
+            ],
+        )
+        assert result.exit_code == 0
+        testdir = out / "testdir"
+        assert (testdir / "text,fff").is_file()
+        assert (testdir / "swic,ffb").is_file()
+
+
+class TestTestdirRoZip:
+    """Tests using testdir-ro.zip from gerph/python-zipinfo-riscos.
+
+    Same content as testdir-unix.zip but with SparkFS extra fields instead
+    of filename encoding. Useful for cross-checking metadata equivalence.
+    """
+
+    def test_fixture_exists(self):
+        assert TESTDIR_RO_ZIP_FILEPATH.is_file()
+
+    def test_all_entries_have_sparkfs(self):
+        with zipfile.ZipFile(TESTDIR_RO_ZIP_FILEPATH) as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                meta = parse_sparkfs_extra(info.extra)
+                assert meta is not None, f"{info.filename} missing SparkFS extra"
+
+    def test_entry_count(self):
+        with zipfile.ZipFile(TESTDIR_RO_ZIP_FILEPATH) as zf:
+            files = [i for i in zf.infolist() if not i.is_dir()]
+            assert len(files) == 4
+
+    def test_same_filetypes_as_unix_variant(self):
+        """Both testdir-ro.zip and testdir-unix.zip should yield the same filetypes."""
+        runner = CliRunner()
+        ro_result = runner.invoke(cli, ["info", str(TESTDIR_RO_ZIP_FILEPATH)])
+        unix_result = runner.invoke(cli, ["info", str(TESTDIR_UNIX_ZIP_FILEPATH)])
+        # Both should have the same 4 filetypes
+        for ft in ["FF8:", "FFB:", "FFD:", "FFF:"]:
+            assert ft in ro_result.output
+            assert ft in unix_result.output
 
 
 # =========================================================================

@@ -419,14 +419,22 @@ uv run --with pytest --with xattr pytest tests/ -v
 ```
 
 The test suite covers all parsing, formatting, and extraction logic,
-including integration tests against three real-world ZIP fixtures:
+including integration tests against six real-world ZIP fixtures:
 
 - **NetUtils.zip** --- Econet utilities from [MDFS](https://mdfs.net/Apps/Networking/),
   with SparkFS/ARC0 extra fields. This is the archive that motivated the project.
 - **NetUtilB.zip** --- A second Econet utilities pack, also with SparkFS metadata.
+- **MASTER.zip** --- BBC Master utilities from
+  [MDFS](https://mdfs.net/Mirror/Archive/SJ/MDFS/MASTER.zip), 344 files with
+  SparkFS metadata and 36 distinct filetypes.
 - **sweh_econet_system.zip** --- PiEconetBridge system files from
   [sweh](https://sweh.spuddy.org/tmp/econet-bridge/), containing bundled
   PiEconetBridge-format `.inf` sidecar files (no SparkFS extra fields).
+- **testdir-unix.zip** --- Test archive from
+  [python-zipinfo-riscos](https://github.com/gerph/python-zipinfo-riscos),
+  with Unix filename encoding (`,xxx` suffixes).
+- **testdir-ro.zip** --- The same content as testdir-unix.zip but with SparkFS
+  extra fields instead of filename encoding.
 
 ## References
 
