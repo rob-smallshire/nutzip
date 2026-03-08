@@ -331,7 +331,7 @@ Load address: FFFtttxx
                  filetype (3 hex digits)
 ```
 
-Common filetypes in BBC/Econet software:
+Example RISC OS filetypes:
 
 | Type  | Name       | Description                               |
 |-------|------------|-------------------------------------------|
