@@ -5,11 +5,38 @@ from __future__ import annotations
 import io
 import os
 import struct
+import sys
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+requires_xattr = pytest.mark.skipif(
+    sys.platform == "win32", reason="Extended attributes not supported on Windows"
+)
+
+
+def get_xattr(filepath: Path, name: str) -> bytes:
+    """Read an extended attribute, using os.getxattr on Linux or xattr package on macOS."""
+    if hasattr(os, "getxattr"):
+        return os.getxattr(str(filepath), name)
+    else:
+        import xattr
+
+        return xattr.xattr(str(filepath)).get(name)
+
+
+def list_xattrs(filepath: Path) -> list[str]:
+    """List extended attribute names on a file."""
+    if hasattr(os, "listxattr"):
+        return os.listxattr(str(filepath))
+    else:
+        import xattr
+
+        return xattr.xattr(str(filepath)).list()
+
+
 from click.testing import CliRunner
 
 # Import from the script - register module before exec to avoid __module__ issues
@@ -812,6 +839,7 @@ class TestNetUtilsZip:
         assert (out / "Free").is_file()
         assert not (out / "Free.inf").exists()
 
+    @requires_xattr
     def test_extract_xattr(self, tmp_path):
         runner = CliRunner()
         out = tmp_path / "out"
@@ -827,12 +855,9 @@ class TestNetUtilsZip:
             ],
         )
         assert result.exit_code == 0
-        import xattr
-
-        x = xattr.xattr(str(out / "Free"))
-        assert x.get("user.econet_load") == b"FFFF0E10"
-        assert x.get("user.econet_exec") == b"FFFF0E10"
-        assert x.get("user.econet_owner") == b"0000"
+        assert get_xattr(out / "Free", "user.econet_load") == b"FFFF0E10"
+        assert get_xattr(out / "Free", "user.econet_exec") == b"FFFF0E10"
+        assert get_xattr(out / "Free", "user.econet_owner") == b"0000"
 
     def test_extract_verbose(self, tmp_path):
         runner = CliRunner()
@@ -1012,6 +1037,7 @@ class TestExtractMember:
         assert parts[2] == "801f"
         assert parts[3] == "3"
 
+    @requires_xattr
     def test_sparkfs_xattr(self, tmp_path):
         extra = build_sparkfs_extra(0xFFFF0E10, 0x0000801F, 0x03)
         data = b"\x00" * 64
@@ -1025,13 +1051,11 @@ class TestExtractMember:
                 meta_format=MetaFormat.XATTR,
                 owner=5,
             )
-        import xattr
-
-        x = xattr.xattr(str(tmp_path / "out" / "PROG"))
-        assert x.get("user.econet_load") == b"FFFF0E10"
-        assert x.get("user.econet_exec") == b"0000801F"
-        assert x.get("user.econet_perm") == b"03"
-        assert x.get("user.econet_owner") == b"0005"
+        prog_filepath = tmp_path / "out" / "PROG"
+        assert get_xattr(prog_filepath, "user.econet_load") == b"FFFF0E10"
+        assert get_xattr(prog_filepath, "user.econet_exec") == b"0000801F"
+        assert get_xattr(prog_filepath, "user.econet_perm") == b"03"
+        assert get_xattr(prog_filepath, "user.econet_owner") == b"0005"
 
     def test_encoded_filename_cleaned(self, tmp_path):
         data = b"\x01" * 32
@@ -1092,65 +1116,46 @@ class TestExtractMember:
 # =========================================================================
 
 
+@requires_xattr
 class TestWriteEconetXattrs:
     def test_sets_all_four_attrs(self, tmp_path):
         filepath = tmp_path / "testfile"
         filepath.write_bytes(b"data")
         write_econet_xattrs(filepath, 0xFFFF0E10, 0x0000801F, 0x03, owner=0)
-
-        import xattr
-
-        x = xattr.xattr(str(filepath))
-        assert x.get("user.econet_load") == b"FFFF0E10"
-        assert x.get("user.econet_exec") == b"0000801F"
-        assert x.get("user.econet_perm") == b"03"
-        assert x.get("user.econet_owner") == b"0000"
+        assert get_xattr(filepath, "user.econet_load") == b"FFFF0E10"
+        assert get_xattr(filepath, "user.econet_exec") == b"0000801F"
+        assert get_xattr(filepath, "user.econet_perm") == b"03"
+        assert get_xattr(filepath, "user.econet_owner") == b"0000"
 
     def test_owner_formatting(self, tmp_path):
         filepath = tmp_path / "testfile"
         filepath.write_bytes(b"data")
         write_econet_xattrs(filepath, 0, 0, 0, owner=255)
-
-        import xattr
-
-        x = xattr.xattr(str(filepath))
-        assert x.get("user.econet_owner") == b"00FF"
+        assert get_xattr(filepath, "user.econet_owner") == b"00FF"
 
     def test_default_perm_when_attr_none(self, tmp_path):
         filepath = tmp_path / "testfile"
         filepath.write_bytes(b"data")
         write_econet_xattrs(filepath, 0, 0, attr=None)
-
-        import xattr
-
-        x = xattr.xattr(str(filepath))
-        assert x.get("user.econet_perm") == b"17"
+        assert get_xattr(filepath, "user.econet_perm") == b"17"
 
     def test_zero_values(self, tmp_path):
         filepath = tmp_path / "testfile"
         filepath.write_bytes(b"data")
         write_econet_xattrs(filepath, 0, 0, 0, owner=0)
-
-        import xattr
-
-        x = xattr.xattr(str(filepath))
-        assert x.get("user.econet_load") == b"00000000"
-        assert x.get("user.econet_exec") == b"00000000"
-        assert x.get("user.econet_perm") == b"00"
-        assert x.get("user.econet_owner") == b"0000"
+        assert get_xattr(filepath, "user.econet_load") == b"00000000"
+        assert get_xattr(filepath, "user.econet_exec") == b"00000000"
+        assert get_xattr(filepath, "user.econet_perm") == b"00"
+        assert get_xattr(filepath, "user.econet_owner") == b"0000"
 
     def test_max_values(self, tmp_path):
         filepath = tmp_path / "testfile"
         filepath.write_bytes(b"data")
         write_econet_xattrs(filepath, 0xFFFFFFFF, 0xFFFFFFFF, 0xFF, owner=0xFFFF)
-
-        import xattr
-
-        x = xattr.xattr(str(filepath))
-        assert x.get("user.econet_load") == b"FFFFFFFF"
-        assert x.get("user.econet_exec") == b"FFFFFFFF"
-        assert x.get("user.econet_perm") == b"FF"
-        assert x.get("user.econet_owner") == b"FFFF"
+        assert get_xattr(filepath, "user.econet_load") == b"FFFFFFFF"
+        assert get_xattr(filepath, "user.econet_exec") == b"FFFFFFFF"
+        assert get_xattr(filepath, "user.econet_perm") == b"FF"
+        assert get_xattr(filepath, "user.econet_owner") == b"FFFF"
 
 
 # =========================================================================
@@ -1322,10 +1327,9 @@ class TestCliBundledInf:
         # The bundled PiEB .inf should NOT be extracted as a separate file
         # (it would conflict with the rewritten Acorn .inf)
 
+    @requires_xattr
     def test_extract_pieb_inf_as_xattr(self, tmp_path):
         """Bundled PiEB .inf is consumed and written as xattrs."""
-        import xattr as xattr_mod
-
         zip_filepath = _make_zip_with_inf(
             tmp_path, [("FILE", b"\x00" * 8, "0 ffffdd00 ffffdd00 3")]
         )
@@ -1337,9 +1341,8 @@ class TestCliBundledInf:
         )
         assert result.exit_code == 0
         assert (out / "FILE").is_file()
-        x = xattr_mod.xattr(str(out / "FILE"))
-        assert x.get("user.econet_load") == b"FFFFDD00"
-        assert x.get("user.econet_exec") == b"FFFFDD00"
+        assert get_xattr(out / "FILE", "user.econet_load") == b"FFFFDD00"
+        assert get_xattr(out / "FILE", "user.econet_exec") == b"FFFFDD00"
         # No .inf file should exist
         assert not (out / "FILE.inf").exists()
 
@@ -1429,6 +1432,7 @@ class TestSwehBundledInf:
         assert result.exit_code == 0
         assert "PiEB-inf" in result.output
 
+    @requires_xattr
     def test_extract_xattr_no_inf_files(self, tmp_path):
         """Extracting with xattr format should consume .inf files."""
         out = tmp_path / "out"
@@ -1439,13 +1443,11 @@ class TestSwehBundledInf:
         )
         assert result.exit_code == 0
         # Check that at least one file has xattrs
-        import xattr as xattr_mod
         library_dirpath = out / "Library"
         if library_dirpath.is_dir():
             for filepath in library_dirpath.iterdir():
                 if filepath.is_file() and not filepath.name.endswith(".inf"):
-                    x = xattr_mod.xattr(str(filepath))
-                    attrs = x.list()
+                    attrs = list_xattrs(filepath)
                     if attrs:
                         assert "user.econet_load" in attrs
                         break

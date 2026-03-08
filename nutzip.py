@@ -4,7 +4,7 @@
 # dependencies = [
 #     "click>=8.0",
 #     "rich>=13.0",
-#     "xattr>=1.0",
+#     "xattr>=1.0; sys_platform == 'darwin'",
 # ]
 # ///
 """
@@ -34,6 +34,7 @@ References:
 
 from __future__ import annotations
 
+import os
 import re
 import struct
 import sys
@@ -43,7 +44,6 @@ from enum import Enum
 from pathlib import Path
 
 import click
-import xattr
 
 
 # SparkFS extra field constants
@@ -379,6 +379,23 @@ def format_pibridge_inf_line(
     return f"{owner:x} {load_addr:x} {exec_addr:x} {perm:x}"
 
 
+def _set_xattrs(filepath: Path, attrs: dict[str, str]) -> None:
+    """Set extended attributes on a file.
+
+    Uses os.setxattr on Linux, or the xattr package on macOS.
+    """
+    path_str = str(filepath)
+    if hasattr(os, "setxattr"):
+        for name, value in attrs.items():
+            os.setxattr(path_str, name, value.encode("ascii"))
+    else:
+        import xattr
+
+        x = xattr.xattr(path_str)
+        for name, value in attrs.items():
+            x.set(name, value.encode("ascii"))
+
+
 def write_econet_xattrs(
     filepath: Path,
     load_addr: int,
@@ -394,12 +411,14 @@ def write_econet_xattrs(
         user.econet_exec   = %08X
         user.econet_perm   = %02X
     """
-    x = xattr.xattr(str(filepath))
-    x.set("user.econet_owner", f"{owner:04X}".encode("ascii"))
-    x.set("user.econet_load", f"{load_addr:08X}".encode("ascii"))
-    x.set("user.econet_exec", f"{exec_addr:08X}".encode("ascii"))
     perm = attr if attr is not None else 0x17
-    x.set("user.econet_perm", f"{perm:02X}".encode("ascii"))
+    attrs = {
+        "user.econet_owner": f"{owner:04X}",
+        "user.econet_load": f"{load_addr:08X}",
+        "user.econet_exec": f"{exec_addr:08X}",
+        "user.econet_perm": f"{perm:02X}",
+    }
+    _set_xattrs(filepath, attrs)
 
 
 # ---------------------------------------------------------------------------
