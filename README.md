@@ -307,11 +307,14 @@ by [David Pilling](http://www.davidpilling.com/wiki/index.php/SparkFS):
 This is the most reliable metadata source, as it is embedded in the ZIP
 structure itself and survives transfers between any systems.
 
-### NFS filename encoding
+### Unix NFS filename encoding
 
-An alternative convention, used when transferring Acorn files via NFS or
-between RISC OS and Unix systems, encodes metadata into the filename itself
-using comma-separated hex suffixes:
+An alternative convention, originating from how RISC OS files were served via
+Sun's [Network File System](https://en.wikipedia.org/wiki/Network_File_System)
+(Unix NFS --- not to be confused with Acorn's Econet NFS), encodes Acorn
+metadata into the filename itself using comma-separated hex suffixes. Because
+Unix filesystems have no way to store Acorn load/exec addresses natively, the
+metadata is appended to the filename:
 
 | Pattern                         | Example                    | Meaning                     |
 |---------------------------------|----------------------------|-----------------------------|
