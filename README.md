@@ -294,8 +294,8 @@ exactly:
 | `user.econet_perm`   | `%02X`           | `03`         |
 
 This is the preferred format for PiEconetBridge when the host filesystem
-supports extended attributes (ext4, XFS, HFS+, APFS). PiEconetBridge reads
-xattrs in preference to `.inf` files when both are present.
+supports extended attributes. PiEconetBridge reads xattrs in preference
+to `.inf` files when both are present.
 
 ### Format 4: RISC OS filename encoding
 
