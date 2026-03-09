@@ -1,6 +1,6 @@
 """oaknut-zip - Work with ZIP files containing Acorn computer metadata."""
 
-__version__ = "0.2.8"
+__version__ = "0.2.9"
 
 from .models import (
     ATTR_KEY,
