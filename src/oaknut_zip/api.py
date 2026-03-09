@@ -20,7 +20,22 @@ from .parsing import build_inf_index, resolve_metadata
 
 
 def sanitise_extract_path(base_dirpath: Path, member_path: str) -> Path:
-    """Sanitise a ZIP member path to prevent directory traversal."""
+    """Sanitise a ZIP member path to prevent directory traversal.
+
+    Strips ``..``, ``/``, and ``\\`` components from the member path and
+    resolves the result relative to *base_dirpath*.
+
+    Args:
+        base_dirpath: The root directory that all extracted paths must
+            fall within.
+        member_path: The raw path from the ZIP entry.
+
+    Returns:
+        A safe path under *base_dirpath*.
+
+    Raises:
+        ValueError: If the resolved path escapes *base_dirpath*.
+    """
     parts = Path(member_path).parts
     safe_parts = [p for p in parts if p not in ("..", "/", "\\")]
     if not safe_parts:
@@ -41,7 +56,22 @@ def extract_member(
     owner: int = 0,
     inf_index: dict[str, tuple[str, AcornMeta]] | None = None,
 ) -> None:
-    """Extract a single ZIP member, optionally writing metadata."""
+    """Extract a single ZIP member, optionally writing metadata.
+
+    Writes the member's data to *output_dirpath* and, when Acorn metadata
+    is available, writes it in the requested *meta_format*.
+
+    Args:
+        zf: An open ZipFile to read from.
+        info: The ZipInfo entry to extract.
+        output_dirpath: Directory to extract into.
+        verbose: Print extraction progress to stdout.
+        meta_format: Output metadata format, or ``None`` to skip metadata.
+        decode_filenames: Strip encoded metadata suffixes from filenames.
+        owner: Econet owner ID for inf-pieb and xattr formats.
+        inf_index: Pre-built index of bundled ``.inf`` metadata, as
+            returned by :func:`~oaknut_zip.parsing.build_inf_index`.
+    """
 
     if info.is_dir():
         dirpath = sanitise_extract_path(output_dirpath, info.filename)
@@ -189,10 +219,18 @@ def extract_archive(
 def list_archive(
     zipfile_path: Path,
 ) -> list[dict]:
-    """List ZIP contents with Acorn metadata.
+    """List ZIP contents with resolved Acorn metadata.
 
-    Returns a list of dicts with keys: filename, load_addr, exec_addr,
-    file_size, attr, filetype, source, is_dir.
+    Args:
+        zipfile_path: Path to the ZIP file.
+
+    Returns:
+        A list of dicts, one per entry (excluding consumed ``.inf``
+        sidecars), with keys: ``filename``, ``is_dir``, ``file_size``,
+        ``load_addr``, ``exec_addr``, ``attr``, ``filetype``, ``source``.
+
+    Raises:
+        click.ClickException: If the file is not a valid ZIP.
     """
     if not zipfile.is_zipfile(zipfile_path):
         raise click.ClickException(f"{zipfile_path} is not a valid ZIP file")
@@ -247,8 +285,17 @@ def archive_info(
 ) -> dict:
     """Return summary statistics of Acorn metadata in a ZIP file.
 
-    Returns a dict with keys: filename, total, dirs, sparkfs_count,
-    inf_count, pieb_inf_count, filename_count, plain_count, filetypes.
+    Args:
+        zipfile_path: Path to the ZIP file.
+
+    Returns:
+        A dict with keys: ``filename``, ``total``, ``dirs``,
+        ``sparkfs_count``, ``inf_count``, ``pieb_inf_count``,
+        ``filename_count``, ``plain_count``, ``filetypes`` (a dict
+        mapping filetype ints to counts).
+
+    Raises:
+        click.ClickException: If the file is not a valid ZIP.
     """
     if not zipfile.is_zipfile(zipfile_path):
         raise click.ClickException(f"{zipfile_path} is not a valid ZIP file")
