@@ -8,7 +8,7 @@ import click
 
 from . import __version__
 from .api import archive_info, extract_archive, list_archive
-from .formatting import format_access
+from .formatting import format_access_text
 from .models import (
     ATTR_KEY,
     DIRS_KEY,
@@ -161,7 +161,7 @@ def list_cmd(zipfile_path: Path) -> None:
             if entry[LOAD_ADDR_KEY] is not None:
                 ft = entry[FILETYPE_KEY]
                 ft_str = f"{ft:03X}" if ft is not None else ""
-                attr_str = format_access(entry[ATTR_KEY]) if entry[ATTR_KEY] is not None else ""
+                attr_str = format_access_text(entry[ATTR_KEY]) if entry[ATTR_KEY] is not None else ""
                 table.add_row(
                     display_name,
                     f"{entry[LOAD_ADDR_KEY]:08X}",
@@ -178,7 +178,7 @@ def list_cmd(zipfile_path: Path) -> None:
         if entry[LOAD_ADDR_KEY] is not None:
             ft = entry[FILETYPE_KEY]
             ft_str = f"{ft:03X}" if ft is not None else ""
-            attr_str = format_access(entry[ATTR_KEY]) if entry[ATTR_KEY] is not None else ""
+            attr_str = format_access_text(entry[ATTR_KEY]) if entry[ATTR_KEY] is not None else ""
             table.add_row(
                 display_name,
                 f"{entry[LOAD_ADDR_KEY]:08X}",

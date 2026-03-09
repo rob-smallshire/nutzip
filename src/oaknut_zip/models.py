@@ -20,12 +20,15 @@ SUFFIX_FILETYPE_RE = re.compile(r"^(.*),([0-9a-fA-F]{3})$")
 SUFFIX_LOADEXEC_RE = re.compile(r"^(.*),([0-9a-fA-F]{8}),([0-9a-fA-F]{8})$")
 SUFFIX_MOS_LOADEXEC_RE = re.compile(r"^(.*),([0-9a-fA-F]{1,8})-([0-9a-fA-F]{1,8})$")
 
-# Acorn attribute bits
-ATTR_OWNER_WRITE = 0x01
-ATTR_OWNER_READ = 0x02
+# RISC OS file attribute bits (as used by SparkFS and PiEconetBridge).
+# See RISC OS PRM volume 2, section on FileSwitch attributes.
+# Bit 0 = owner read, bit 1 = owner write, bit 3 = locked,
+# bit 4 = public read, bit 5 = public write.
+ATTR_OWNER_READ = 0x01
+ATTR_OWNER_WRITE = 0x02
 ATTR_LOCKED = 0x08
-ATTR_PUBLIC_WRITE = 0x10
-ATTR_PUBLIC_READ = 0x20
+ATTR_PUBLIC_READ = 0x10
+ATTR_PUBLIC_WRITE = 0x20
 
 
 class MetaFormat(str, Enum):

@@ -13,14 +13,40 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .models import AcornMeta
+from .models import (
+    ATTR_LOCKED,
+    ATTR_OWNER_READ,
+    ATTR_OWNER_WRITE,
+    ATTR_PUBLIC_READ,
+    ATTR_PUBLIC_WRITE,
+    AcornMeta,
+)
 
 
 def format_access(attr: int | None) -> str:
-    """Format Acorn attributes as a hex string."""
+    """Format Acorn attributes as a hex string for INF output."""
     if attr is None:
         return ""
     return f"{attr:02X}"
+
+
+def format_access_text(attr: int | None) -> str:
+    """Format Acorn attributes as a human-readable access string.
+
+    Uses the Acorn convention: ``L`` (locked), then owner ``WR``, then
+    ``/``, then public ``WR``.  For example ``LWR/R`` means locked,
+    owner write+read, public read.
+    """
+    if attr is None:
+        return ""
+    owner = ""
+    owner += "L" if attr & ATTR_LOCKED else ""
+    owner += "W" if attr & ATTR_OWNER_WRITE else ""
+    owner += "R" if attr & ATTR_OWNER_READ else ""
+    public = ""
+    public += "W" if attr & ATTR_PUBLIC_WRITE else ""
+    public += "R" if attr & ATTR_PUBLIC_READ else ""
+    return f"{owner}/{public}"
 
 
 def build_filename_suffix(meta: AcornMeta) -> str:
