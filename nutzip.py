@@ -19,11 +19,12 @@ Supports three metadata sources within ZIP files:
   - Bundled INF sidecar files (Acorn or PiEconetBridge format)
   - Unix filename encoding (,xxx filetype or ,llllllll,eeeeeeee load/exec)
 
-Supports four output metadata formats:
+Supports five output metadata formats:
   - Acorn INF: filename load exec length [access]
   - PiEconetBridge INF: owner load exec perm [homeof]
   - Extended attributes: user.econet_{load,exec,perm,owner} xattrs
-  - Unix filename encoding: ,xxx or ,llllllll,eeeeeeee suffixes
+  - RISC OS filename encoding (filename-riscos): ,xxx or ,llllllll,eeeeeeee suffixes
+  - MOS filename encoding (filename-mos): ,load-exec suffixes (SparkFS convention)
 
 References:
   - INF format: https://beebwiki.mdfs.net/INF_file_format
@@ -52,10 +53,12 @@ SPARKFS_SIGNATURE = b"ARC0"
 SPARKFS_DATA_LENGTH = 20  # 4 sig + 4 load + 4 exec + 4 attr + 4 reserved
 
 # Unix filename encoding patterns
-# ,xxx = 3-hex-digit filetype
-# ,llllllll,eeeeeeee = 8-hex-digit load and exec addresses
+# ,xxx = 3-hex-digit RISC OS filetype
+# ,llllllll,eeeeeeee = 8-hex-digit load and exec addresses (python-zipinfo-riscos)
+# ,load-exec = 1-to-8-hex-digit load and exec with dash separator (MOS/SparkFS)
 SUFFIX_FILETYPE_RE = re.compile(r"^(.*),([0-9a-fA-F]{3})$")
 SUFFIX_LOADEXEC_RE = re.compile(r"^(.*),([0-9a-fA-F]{8}),([0-9a-fA-F]{8})$")
+SUFFIX_MOS_LOADEXEC_RE = re.compile(r"^(.*),([0-9a-fA-F]{1,8})-([0-9a-fA-F]{1,8})$")
 
 # BBC Micro to host filename character mapping
 BBC_TO_HOST = {
@@ -83,7 +86,8 @@ class MetaFormat(str, Enum):
     ACORN = "acorn"
     PIBRIDGE = "pibridge"
     XATTR = "xattr"
-    FILENAME = "filename"
+    FILENAME_RISCOS = "filename-riscos"
+    FILENAME_MOS = "filename-mos"
 
 
 @dataclass
@@ -160,13 +164,23 @@ def parse_sparkfs_extra(extra: bytes) -> AcornMeta | None:
 def parse_encoded_filename(filename: str) -> tuple[str, AcornMeta | None]:
     """Parse Unix-encoded metadata from a filename.
 
-    Two forms:
-        file,xxx              -> filetype xxx (3 hex digits)
-        file,llllllll,eeeeeeee -> load/exec addresses (8 hex digits each)
+    Three forms:
+        file,xxx                -> RISC OS filetype (3 hex digits)
+        file,llllllll,eeeeeeee  -> load/exec addresses (8 hex digits each)
+        file,load-exec          -> MOS load/exec addresses (1-8 hex digits, dash)
 
     Returns the clean filename and any extracted metadata.
     """
     m = SUFFIX_LOADEXEC_RE.match(filename)
+    if m:
+        clean = m.group(1)
+        load_addr = int(m.group(2), 16)
+        exec_addr = int(m.group(3), 16)
+        meta = AcornMeta(load_addr=load_addr, exec_addr=exec_addr)
+        meta.filetype = meta.infer_filetype()
+        return clean, meta
+
+    m = SUFFIX_MOS_LOADEXEC_RE.match(filename)
     if m:
         clean = m.group(1)
         load_addr = int(m.group(2), 16)
@@ -330,7 +344,7 @@ def format_access(attr: int | None) -> str:
 
 
 def build_filename_suffix(meta: AcornMeta) -> str:
-    """Build a Unix filename encoding suffix for Acorn metadata.
+    """Build a RISC OS filename encoding suffix for Acorn metadata.
 
     Returns ',xxx' for filetype-stamped files, or
     ',llllllll,eeeeeeee' for files with literal load/exec addresses.
@@ -339,6 +353,14 @@ def build_filename_suffix(meta: AcornMeta) -> str:
         ft = meta.infer_filetype()
         return f",{ft:03x}"
     return f",{meta.load_addr:08x},{meta.exec_addr:08x}"
+
+
+def build_mos_filename_suffix(meta: AcornMeta) -> str:
+    """Build a MOS filename encoding suffix for Acorn metadata.
+
+    Returns ',load-exec' with variable-width hex digits.
+    """
+    return f",{meta.load_addr:x}-{meta.exec_addr:x}"
 
 
 def format_acorn_inf_line(
@@ -501,8 +523,11 @@ def extract_member(
         if verbose:
             rel = output_filepath.relative_to(output_dirpath)
             click.echo(f"    xattr: {rel}")
-    elif meta_format == MetaFormat.FILENAME:
-        suffix = build_filename_suffix(meta)
+    elif meta_format in (MetaFormat.FILENAME_RISCOS, MetaFormat.FILENAME_MOS):
+        if meta_format == MetaFormat.FILENAME_MOS:
+            suffix = build_mos_filename_suffix(meta)
+        else:
+            suffix = build_filename_suffix(meta)
         if not output_filepath.name.endswith(suffix):
             encoded_filepath = output_filepath.with_name(
                 output_filepath.name + suffix
@@ -563,9 +588,9 @@ def cli() -> None:
 @click.option("-v", "--verbose", is_flag=True, help="Show extraction progress.")
 @click.option(
     "--meta-format",
-    type=click.Choice(["acorn", "pibridge", "xattr", "filename", "none"], case_sensitive=False),
+    type=click.Choice(["acorn", "pibridge", "xattr", "filename-riscos", "filename-mos", "none"], case_sensitive=False),
     default="acorn",
-    help="Metadata format: acorn INF, pibridge INF, xattr, filename encoding, or none.",
+    help="Metadata format: acorn INF, pibridge INF, xattr, filename-riscos, filename-mos, or none.",
 )
 @click.option(
     "--no-decode-filenames",
@@ -603,7 +628,7 @@ def extract(
     if resolved_meta_format == MetaFormat.XATTR and sys.platform == "win32":
         raise click.ClickException(
             "Extended attributes are not supported on Windows. "
-            "Use --meta-format acorn, pibridge, or filename instead."
+            "Use --meta-format acorn, pibridge, or filename-riscos instead."
         )
 
     output_dir.mkdir(parents=True, exist_ok=True)

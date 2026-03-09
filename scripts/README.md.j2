@@ -198,10 +198,10 @@ This is the preferred format for PiEconetBridge when the host filesystem
 supports extended attributes (ext4, XFS, HFS+, APFS). PiEconetBridge reads
 xattrs in preference to `.inf` files when both are present.
 
-### Format 4: Unix filename encoding
+### Format 4: RISC OS filename encoding
 
 ```
-./nutzip.py extract --meta-format filename NetUtils.zip
+./nutzip.py extract --meta-format filename-riscos NetUtils.zip
 ```
 
 Encodes metadata directly into the output filenames using comma-separated hex
@@ -213,7 +213,23 @@ This is the most portable format --- it requires no filesystem-specific
 support and survives transfers between any systems. Files already carrying
 the correct suffix are not double-encoded.
 
-### Format 5: No metadata
+### Format 5: MOS filename encoding
+
+```
+./nutzip.py extract --meta-format filename-mos NetUtils.zip
+```
+
+Encodes metadata into output filenames using the `,load-exec` convention
+documented in the [BeebWiki INF file format](https://beebwiki.mdfs.net/INF_file_format)
+specification. This format uses a comma prefix with load and exec addresses
+separated by a dash, with variable-width hex digits (no zero-padding):
+`,1900-801f`.
+
+This is the convention used by MOS and SparkFS when encoding addresses in
+filenames. Unlike the RISC OS form (Format 4), it always encodes full
+load/exec addresses and does not special-case filetype-stamped files.
+
+### Format 6: No metadata
 
 ```
 ./nutzip.py extract --meta-format none NetUtils.zip
@@ -280,14 +296,20 @@ comma-separated hex suffix:
 |---------------------------------|----------------------------|-----------------------------|
 | `filename,xxx`                  | `HELLO,ffb`                | RISC OS filetype `FFB`      |
 
-nutzip also supports a second form, as implemented by
-[python-zipinfo-riscos](https://github.com/gerph/python-zipinfo-riscos),
-which encodes full load and exec addresses for files that are not
-filetype-stamped:
+nutzip also supports two additional forms that encode full load and exec
+addresses for files that are not filetype-stamped:
 
 | Pattern                         | Example                    | Meaning                     |
 |---------------------------------|----------------------------|-----------------------------|
 | `filename,llllllll,eeeeeeee`    | `PROG,ffff0e10,0000801f`   | Load and exec addresses     |
+| `filename,load-exec`            | `PROG,1900-801f`           | Load and exec (MOS/SparkFS) |
+
+The first form is used by
+[python-zipinfo-riscos](https://github.com/gerph/python-zipinfo-riscos)
+and requires exactly 8 hex digits per address. The second form, documented
+in the [BeebWiki INF file format](https://beebwiki.mdfs.net/INF_file_format)
+specification, uses variable-width hex digits separated by a dash and is the
+convention used by MOS and SparkFS.
 
 nutzip strips these suffixes from output filenames during extraction.
 Use `--no-decode-filenames` to preserve the encoded filenames as-is.

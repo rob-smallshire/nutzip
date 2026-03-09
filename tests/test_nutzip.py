@@ -57,6 +57,7 @@ parse_inf_line = nutzip.parse_inf_line
 build_inf_index = nutzip.build_inf_index
 resolve_metadata = nutzip.resolve_metadata
 build_filename_suffix = nutzip.build_filename_suffix
+build_mos_filename_suffix = nutzip.build_mos_filename_suffix
 format_acorn_inf_line = nutzip.format_acorn_inf_line
 format_pibridge_inf_line = nutzip.format_pibridge_inf_line
 format_access = nutzip.format_access
@@ -358,6 +359,42 @@ class TestParseEncodedFilename:
     def test_load_exec_without_filetype_in_load(self):
         _, meta = parse_encoded_filename("FILE,00001900,0000801f")
         assert meta.infer_filetype() is None
+
+    def test_mos_dash_form(self):
+        clean, meta = parse_encoded_filename("PROG,1900-801F")
+        assert clean == "PROG"
+        assert meta is not None
+        assert meta.load_addr == 0x1900
+        assert meta.exec_addr == 0x801F
+
+    def test_mos_dash_form_full_width(self):
+        clean, meta = parse_encoded_filename("FILE,FFFF0E10-FFFF0E10")
+        assert clean == "FILE"
+        assert meta.load_addr == 0xFFFF0E10
+        assert meta.exec_addr == 0xFFFF0E10
+        assert meta.infer_filetype() == 0xF0E
+
+    def test_mos_dash_form_short(self):
+        clean, meta = parse_encoded_filename("DATA,0-0")
+        assert clean == "DATA"
+        assert meta.load_addr == 0
+        assert meta.exec_addr == 0
+
+    def test_mos_dash_form_with_path(self):
+        clean, meta = parse_encoded_filename("dir/FILE,1900-801F")
+        assert clean == "dir/FILE"
+        assert meta.load_addr == 0x1900
+
+    def test_mos_dash_form_lowercase(self):
+        clean, meta = parse_encoded_filename("file,ffff0e10-ffff0e10")
+        assert clean == "file"
+        assert meta.load_addr == 0xFFFF0E10
+
+    def test_mos_dash_no_comma(self):
+        """Dash without comma prefix is not a MOS encoding."""
+        clean, meta = parse_encoded_filename("file-1900")
+        assert clean == "file-1900"
+        assert meta is None
 
 
 # =========================================================================
@@ -1661,7 +1698,7 @@ class TestCliFilenameFormat:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["extract", "--meta-format", "filename", str(zip_filepath), "-d", str(out)],
+            ["extract", "--meta-format", "filename-riscos", str(zip_filepath), "-d", str(out)],
         )
         assert result.exit_code == 0
         assert (out / "FILE,fdd").is_file()
@@ -1676,7 +1713,7 @@ class TestCliFilenameFormat:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["extract", "--meta-format", "filename", str(zip_filepath), "-d", str(out)],
+            ["extract", "--meta-format", "filename-riscos", str(zip_filepath), "-d", str(out)],
         )
         assert result.exit_code == 0
         assert (out / "PROG,00001900,0000801f").is_file()
@@ -1693,7 +1730,7 @@ class TestCliFilenameFormat:
         result = runner.invoke(
             cli,
             [
-                "extract", "--meta-format", "filename",
+                "extract", "--meta-format", "filename-riscos",
                 "--no-decode-filenames",
                 str(zip_filepath), "-d", str(out),
             ],
@@ -1711,7 +1748,7 @@ class TestCliFilenameFormat:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["extract", "--meta-format", "filename", str(zip_filepath), "-d", str(out)],
+            ["extract", "--meta-format", "filename-riscos", str(zip_filepath), "-d", str(out)],
         )
         assert result.exit_code == 0
         assert (out / "FILE,fdd").is_file()
@@ -1724,7 +1761,91 @@ class TestCliFilenameFormat:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["extract", "--meta-format", "filename", str(zip_filepath), "-d", str(out)],
+            ["extract", "--meta-format", "filename-riscos", str(zip_filepath), "-d", str(out)],
+        )
+        assert result.exit_code == 0
+        assert (out / "README").is_file()
+
+
+# =========================================================================
+# MOS filename encoding
+# =========================================================================
+
+
+class TestBuildMosFilenameSuffix:
+    def test_short_addresses(self):
+        meta = AcornMeta(load_addr=0x1900, exec_addr=0x801F)
+        assert build_mos_filename_suffix(meta) == ",1900-801f"
+
+    def test_full_width_addresses(self):
+        meta = AcornMeta(load_addr=0xFFFF0E10, exec_addr=0xFFFF0E10)
+        assert build_mos_filename_suffix(meta) == ",ffff0e10-ffff0e10"
+
+    def test_zero_addresses(self):
+        meta = AcornMeta(load_addr=0, exec_addr=0)
+        assert build_mos_filename_suffix(meta) == ",0-0"
+
+    def test_filetype_stamped(self):
+        meta = AcornMeta(load_addr=0xFFFFDD00, exec_addr=0xFFFFDD00)
+        assert build_mos_filename_suffix(meta) == ",ffffdd00-ffffdd00"
+
+
+class TestCliMosFilenameFormat:
+    def test_extract_sparkfs_as_mos_filename(self, tmp_path):
+        """SparkFS metadata is written as MOS filename suffix."""
+        extra = build_sparkfs_extra(0x00001900, 0x0000801F, 0x03)
+        zip_filepath = make_zip_file(tmp_path, [("PROG", b"\x00" * 8, extra)])
+        out = tmp_path / "out"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["extract", "--meta-format", "filename-mos", str(zip_filepath), "-d", str(out)],
+        )
+        assert result.exit_code == 0
+        assert (out / "PROG,1900-801f").is_file()
+        assert not (out / "PROG").exists()
+        assert not (out / "PROG.inf").exists()
+
+    def test_extract_filetype_stamped(self, tmp_path):
+        """Filetype-stamped files still get full load-exec in MOS format."""
+        extra = build_sparkfs_extra(0xFFFFDD00, 0xFFFFDD00, 0x03)
+        zip_filepath = make_zip_file(tmp_path, [("FILE", b"\x00" * 8, extra)])
+        out = tmp_path / "out"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["extract", "--meta-format", "filename-mos", str(zip_filepath), "-d", str(out)],
+        )
+        assert result.exit_code == 0
+        assert (out / "FILE,ffffdd00-ffffdd00").is_file()
+
+    def test_no_double_encoding_mos(self, tmp_path):
+        """A file already carrying the correct MOS suffix is not renamed."""
+        extra = build_sparkfs_extra(0x1900, 0x801F, 0x03)
+        zip_filepath = make_zip_file(
+            tmp_path, [("PROG,1900-801f", b"\x00" * 8, extra)]
+        )
+        out = tmp_path / "out"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "extract", "--meta-format", "filename-mos",
+                "--no-decode-filenames",
+                str(zip_filepath), "-d", str(out),
+            ],
+        )
+        assert result.exit_code == 0
+        assert (out / "PROG,1900-801f").is_file()
+
+    def test_plain_file_unchanged(self, tmp_path):
+        """Files without metadata are not renamed."""
+        zip_filepath = make_zip_file(tmp_path, [("README", b"text", None)])
+        out = tmp_path / "out"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["extract", "--meta-format", "filename-mos", str(zip_filepath), "-d", str(out)],
         )
         assert result.exit_code == 0
         assert (out / "README").is_file()
