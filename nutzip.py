@@ -60,18 +60,6 @@ SUFFIX_FILETYPE_RE = re.compile(r"^(.*),([0-9a-fA-F]{3})$")
 SUFFIX_LOADEXEC_RE = re.compile(r"^(.*),([0-9a-fA-F]{8}),([0-9a-fA-F]{8})$")
 SUFFIX_MOS_LOADEXEC_RE = re.compile(r"^(.*),([0-9a-fA-F]{1,8})-([0-9a-fA-F]{1,8})$")
 
-# BBC Micro to host filename character mapping
-BBC_TO_HOST = {
-    "#": "?",
-    ".": "/",
-    "$": "<",
-    "^": ">",
-    "&": "+",
-    "@": "=",
-    "%": ";",
-}
-HOST_TO_BBC = {v: k for k, v in BBC_TO_HOST.items()}
-
 # Acorn attribute bits
 ATTR_OWNER_WRITE = 0x01
 ATTR_OWNER_READ = 0x02
@@ -457,11 +445,6 @@ def sanitise_extract_path(base_dirpath: Path, member_path: str) -> Path:
     result = base_dirpath.joinpath(*safe_parts)
     result.resolve().relative_to(base_dirpath.resolve())
     return result
-
-
-def host_to_bbc_filename(name: str) -> str:
-    """Convert host filesystem characters back to BBC equivalents."""
-    return "".join(HOST_TO_BBC.get(c, c) for c in name)
 
 
 # ---------------------------------------------------------------------------

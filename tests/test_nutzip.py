@@ -63,7 +63,6 @@ format_pieb_inf_line = nutzip.format_pieb_inf_line
 format_access = nutzip.format_access
 write_econet_xattrs = nutzip.write_econet_xattrs
 sanitise_extract_path = nutzip.sanitise_extract_path
-host_to_bbc_filename = nutzip.host_to_bbc_filename
 extract_member = nutzip.extract_member
 cli = nutzip.cli
 
@@ -720,20 +719,6 @@ class TestSanitiseExtractPath:
     def test_backslash_stripped(self, tmp_path):
         result = sanitise_extract_path(tmp_path, "\\dir\\file")
         assert "dir" in str(result)
-
-
-class TestHostToBbcFilename:
-    def test_slash_to_dot(self):
-        assert host_to_bbc_filename("/") == "."
-
-    def test_question_to_hash(self):
-        assert host_to_bbc_filename("?") == "#"
-
-    def test_no_mapping(self):
-        assert host_to_bbc_filename("hello") == "hello"
-
-    def test_mixed(self):
-        assert host_to_bbc_filename("dir/file") == "dir.file"
 
 
 # =========================================================================
