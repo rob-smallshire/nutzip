@@ -100,9 +100,11 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "xattr", marker = "sys_platform == 'darwin'" },
 ]
 test = [
     { name = "pytest" },
+    { name = "xattr", marker = "sys_platform == 'darwin'" },
 ]
 
 [package.metadata]
@@ -113,8 +115,14 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=7.0" }]
-test = [{ name = "pytest", specifier = ">=7.0" }]
+dev = [
+    { name = "pytest", specifier = ">=7.0" },
+    { name = "xattr", marker = "sys_platform == 'darwin'", specifier = ">=1.0" },
+]
+test = [
+    { name = "pytest", specifier = ">=7.0" },
+    { name = "xattr", marker = "sys_platform == 'darwin'", specifier = ">=1.0" },
+]
 
 [[package]]
 name = "packaging"

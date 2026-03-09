@@ -41,6 +41,7 @@ where = ["src"]
 [dependency-groups]
 test = [
     "pytest>=7.0",
+    "xattr>=1.0; sys_platform == 'darwin'",
 ]
 dev = [
     {include-group = "test"},

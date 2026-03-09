@@ -13,11 +13,11 @@ oaknut-zip is a Python 3.10+ CLI tool and library for extracting ZIP files conta
 uv run oaknut-zip <command> [options]
 
 # Run all tests
-uv run --with pytest --with xattr pytest tests/ -v
+uv run --group test pytest tests/ -v
 
 # Run a single test class or test
-uv run --with pytest --with xattr pytest tests/test_oaknut_zip.py::TestAcornMeta -v
-uv run --with pytest --with xattr pytest tests/test_oaknut_zip.py::TestAcornMeta::test_filetype_from_load_addr -v
+uv run --group test pytest tests/test_oaknut_zip.py::TestAcornMeta -v
+uv run --group test pytest tests/test_oaknut_zip.py::TestAcornMeta::test_filetype_from_load_addr -v
 
 # Regenerate README from template
 uv run scripts/generate_readme.py

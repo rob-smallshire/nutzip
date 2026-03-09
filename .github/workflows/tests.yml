@@ -18,13 +18,8 @@ jobs:
 
       - uses: astral-sh/setup-uv@v5
 
-      - name: Run tests (macOS)
-        if: runner.os == 'macOS'
-        run: uv run --python 3.13 --with pytest --with xattr pytest tests/ -v
-
-      - name: Run tests (Linux/Windows)
-        if: runner.os != 'macOS'
-        run: uv run --python 3.13 --with pytest pytest tests/ -v
+      - name: Run tests
+        run: uv run --python 3.13 --group test pytest tests/ -v
 
   readme-check:
     runs-on: macos-latest
