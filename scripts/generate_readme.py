@@ -167,7 +167,7 @@ def main() -> int:
         else:
             print(
                 "ERROR: README.md is out of date. "
-                "Regenerate with: ./scripts/generate_readme.py",
+                "Regenerate with: uv run scripts/generate_readme.py",
                 file=sys.stderr,
             )
             return 1
