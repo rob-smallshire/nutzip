@@ -16,12 +16,12 @@ unzip tools discard.
 
 Supports three metadata sources within ZIP files:
   - SparkFS extra fields (header ID 0x4341, "ARC0" signature)
-  - Bundled INF sidecar files (Acorn or PiEconetBridge format)
+  - Bundled INF sidecar files (traditional or PiEconetBridge format)
   - Unix filename encoding (,xxx filetype or ,llllllll,eeeeeeee load/exec)
 
 Supports five output metadata formats:
-  - Acorn INF: filename load exec length [access]
-  - PiEconetBridge INF: owner load exec perm [homeof]
+  - Traditional INF (inf-trad): filename load exec length [access]
+  - PiEconetBridge INF (inf-pieb): owner load exec perm [homeof]
   - Extended attributes: user.econet_{load,exec,perm,owner} xattrs
   - RISC OS filename encoding (filename-riscos): ,xxx or ,llllllll,eeeeeeee suffixes
   - MOS filename encoding (filename-mos): ,load-exec suffixes (SparkFS convention)
@@ -83,8 +83,8 @@ ATTR_PUBLIC_READ = 0x20
 class MetaFormat(str, Enum):
     """Supported output metadata formats."""
 
-    ACORN = "acorn"
-    PIBRIDGE = "pibridge"
+    INF_TRAD = "inf-trad"
+    INF_PIEB = "inf-pieb"
     XATTR = "xattr"
     FILENAME_RISCOS = "filename-riscos"
     FILENAME_MOS = "filename-mos"
@@ -208,19 +208,19 @@ def _is_hex(s: str) -> bool:
 def parse_inf_line(line: str) -> tuple[str, AcornMeta] | None:
     """Parse an INF sidecar file line, detecting the flavour.
 
-    Acorn INF:        filename load exec length [access]
-    PiEconetBridge INF:        owner load exec perm [homeof]
+    Traditional INF:   filename load exec length [access]
+    PiEconetBridge INF: owner load exec perm [homeof]
 
-    Returns (source_label, metadata) where source_label is "inf" for
-    Acorn or "PiEB-inf" for PiEconetBridge.
+    Returns (source_label, metadata) where source_label is "inf-trad" for
+    traditional or "inf-pieb" for PiEconetBridge.
     """
     parts = line.split()
     if len(parts) < 4:
         return None
 
     if not _is_hex(parts[0]):
-        # First field contains non-hex chars, so it must be an Acorn filename.
-        # Acorn INF: filename load exec length [access]
+        # First field contains non-hex chars, so it must be a traditional INF filename.
+        # Traditional INF: filename load exec length [access]
         try:
             load_addr = int(parts[1], 16)
             exec_addr = int(parts[2], 16)
@@ -228,21 +228,21 @@ def parse_inf_line(line: str) -> tuple[str, AcornMeta] | None:
             attr = int(parts[4], 16) if len(parts) >= 5 else None
             meta = AcornMeta(load_addr=load_addr, exec_addr=exec_addr, attr=attr)
             meta.filetype = meta.infer_filetype()
-            return ("inf", meta)
+            return ("inf-trad", meta)
         except (ValueError, IndexError):
             return None
 
     # All fields could be hex. Distinguish by field[3] width:
-    # Acorn length field is always 8-digit hex; PiEB perm is short (1-2 digits).
+    # Traditional INF length field is always 8-digit hex; PiEB perm is short (1-2 digits).
     if len(parts[3]) == 8 and _is_hex(parts[3]):
-        # Acorn INF with a hex-only filename
+        # Traditional INF with a hex-only filename
         try:
             load_addr = int(parts[1], 16)
             exec_addr = int(parts[2], 16)
             attr = int(parts[4], 16) if len(parts) >= 5 else None
             meta = AcornMeta(load_addr=load_addr, exec_addr=exec_addr, attr=attr)
             meta.filetype = meta.infer_filetype()
-            return ("inf", meta)
+            return ("inf-trad", meta)
         except (ValueError, IndexError):
             return None
 
@@ -253,7 +253,7 @@ def parse_inf_line(line: str) -> tuple[str, AcornMeta] | None:
         perm = int(parts[3], 16)
         meta = AcornMeta(load_addr=load_addr, exec_addr=exec_addr, attr=perm)
         meta.filetype = meta.infer_filetype()
-        return ("PiEB-inf", meta)
+        return ("inf-pieb", meta)
     except (ValueError, IndexError):
         return None
 
@@ -363,14 +363,14 @@ def build_mos_filename_suffix(meta: AcornMeta) -> str:
     return f",{meta.load_addr:x}-{meta.exec_addr:x}"
 
 
-def format_acorn_inf_line(
+def format_trad_inf_line(
     filename: str,
     load_addr: int,
     exec_addr: int,
     length: int,
     attr: int | None = None,
 ) -> str:
-    """Format a Acorn INF line.
+    """Format a traditional INF line.
 
     Format: filename load exec length [access]
     """
@@ -386,7 +386,7 @@ def format_acorn_inf_line(
     return " ".join(parts)
 
 
-def format_pibridge_inf_line(
+def format_pieb_inf_line(
     load_addr: int,
     exec_addr: int,
     attr: int | None = None,
@@ -475,7 +475,7 @@ def extract_member(
     output_dirpath: Path,
     *,
     verbose: bool = False,
-    meta_format: MetaFormat | None = MetaFormat.ACORN,
+    meta_format: MetaFormat | None = MetaFormat.INF_TRAD,
     decode_filenames: bool = True,
     owner: int = 0,
     inf_index: dict[str, tuple[str, AcornMeta]] | None = None,
@@ -539,8 +539,8 @@ def extract_member(
     else:
         leaf_name = output_filepath.name
 
-        if meta_format == MetaFormat.ACORN:
-            inf_line = format_acorn_inf_line(
+        if meta_format == MetaFormat.INF_TRAD:
+            inf_line = format_trad_inf_line(
                 filename=leaf_name,
                 load_addr=meta.load_addr,
                 exec_addr=meta.exec_addr,
@@ -548,7 +548,7 @@ def extract_member(
                 attr=meta.attr,
             )
         else:
-            inf_line = format_pibridge_inf_line(
+            inf_line = format_pieb_inf_line(
                 load_addr=meta.load_addr,
                 exec_addr=meta.exec_addr,
                 attr=meta.attr,
@@ -588,9 +588,9 @@ def cli() -> None:
 @click.option("-v", "--verbose", is_flag=True, help="Show extraction progress.")
 @click.option(
     "--meta-format",
-    type=click.Choice(["acorn", "pibridge", "xattr", "filename-riscos", "filename-mos", "none"], case_sensitive=False),
-    default="acorn",
-    help="Metadata format: acorn INF, pibridge INF, xattr, filename-riscos, filename-mos, or none.",
+    type=click.Choice(["inf-trad", "inf-pieb", "xattr", "filename-riscos", "filename-mos", "none"], case_sensitive=False),
+    default="inf-trad",
+    help="Metadata format: inf-trad, inf-pieb, xattr, filename-riscos, filename-mos, or none.",
 )
 @click.option(
     "--no-decode-filenames",
@@ -601,7 +601,7 @@ def cli() -> None:
     "--owner",
     type=int,
     default=0,
-    help="Econet owner ID for PiEconetBridge INF files (default: 0 = SYST).",
+    help="Econet owner ID for inf-pieb files (default: 0 = SYST).",
 )
 def extract(
     zipfile_path: Path,
@@ -628,7 +628,7 @@ def extract(
     if resolved_meta_format == MetaFormat.XATTR and sys.platform == "win32":
         raise click.ClickException(
             "Extended attributes are not supported on Windows. "
-            "Use --meta-format acorn, pibridge, or filename-riscos instead."
+            "Use --meta-format inf-trad, inf-pieb, or filename-riscos instead."
         )
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -755,9 +755,9 @@ def info(zipfile_path: Path) -> None:
 
             if metadata_source == "sparkfs":
                 sparkfs_count += 1
-            elif metadata_source == "inf":
+            elif metadata_source == "inf-trad":
                 inf_count += 1
-            elif metadata_source == "PiEB-inf":
+            elif metadata_source == "inf-pieb":
                 pieb_inf_count += 1
             elif metadata_source == "filename":
                 filename_count += 1
@@ -773,8 +773,8 @@ def info(zipfile_path: Path) -> None:
         click.echo(f"Files:      {total}")
         click.echo(f"Dirs:       {dirs}")
         click.echo(f"SparkFS:    {sparkfs_count} files with ARC0 extra fields")
-        click.echo(f"INF:        {inf_count} files with bundled Acorn INF")
-        click.echo(f"PiEB-inf:   {pieb_inf_count} files with bundled PiEconetBridge INF")
+        click.echo(f"inf-trad:   {inf_count} files with bundled traditional INF")
+        click.echo(f"inf-pieb:   {pieb_inf_count} files with bundled PiEconetBridge INF")
         click.echo(f"Filename:   {filename_count} files with encoded filenames")
         click.echo(f"Plain:      {plain_count} files without Acorn metadata")
 

@@ -66,7 +66,7 @@ def run_shell(cmd: str) -> str:
     return result.stdout.rstrip()
 
 
-def collect_acorn_inf_examples(extract_dirpath: Path) -> str:
+def collect_trad_inf_examples(extract_dirpath: Path) -> str:
     """Read .inf files and format them as cat-style examples."""
     lines = []
     for name in EXAMPLE_INF_FILES:
@@ -78,7 +78,7 @@ def collect_acorn_inf_examples(extract_dirpath: Path) -> str:
     return "\n".join(lines).rstrip()
 
 
-def collect_pibridge_inf_examples(extract_dirpath: Path) -> str:
+def collect_pieb_inf_examples(extract_dirpath: Path) -> str:
     lines = []
     for name in EXAMPLE_INF_FILES:
         inf_filepath = extract_dirpath / f"{name}.inf"
@@ -114,18 +114,18 @@ def generate() -> str:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
 
-        # Acorn INF extraction
-        acorn_dirpath = tmp / "acorn"
-        run_nutzip("extract", fixture, "-d", str(acorn_dirpath))
-        acorn_inf_examples = collect_acorn_inf_examples(acorn_dirpath)
+        # Traditional INF extraction
+        trad_dirpath = tmp / "trad"
+        run_nutzip("extract", fixture, "-d", str(trad_dirpath))
+        trad_inf_examples = collect_trad_inf_examples(trad_dirpath)
 
         # PiEconetBridge INF extraction
-        pibridge_dirpath = tmp / "pibridge"
+        pieb_dirpath = tmp / "pieb"
         run_nutzip(
-            "extract", "--meta-format", "pibridge", fixture,
-            "-d", str(pibridge_dirpath),
+            "extract", "--meta-format", "inf-pieb", fixture,
+            "-d", str(pieb_dirpath),
         )
-        pibridge_inf_examples = collect_pibridge_inf_examples(pibridge_dirpath)
+        pieb_inf_examples = collect_pieb_inf_examples(pieb_dirpath)
 
         # xattr extraction
         xattr_dirpath = tmp / "xattr"
@@ -146,8 +146,8 @@ def generate() -> str:
         extract_help_output=extract_help_output,
         list_output=list_output,
         info_output=info_output,
-        acorn_inf_examples=acorn_inf_examples,
-        pibridge_inf_examples=pibridge_inf_examples,
+        trad_inf_examples=trad_inf_examples,
+        pieb_inf_examples=pieb_inf_examples,
         xattr_examples=xattr_examples,
     )
 

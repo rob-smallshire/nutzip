@@ -58,8 +58,8 @@ build_inf_index = nutzip.build_inf_index
 resolve_metadata = nutzip.resolve_metadata
 build_filename_suffix = nutzip.build_filename_suffix
 build_mos_filename_suffix = nutzip.build_mos_filename_suffix
-format_acorn_inf_line = nutzip.format_acorn_inf_line
-format_pibridge_inf_line = nutzip.format_pibridge_inf_line
+format_trad_inf_line = nutzip.format_trad_inf_line
+format_pieb_inf_line = nutzip.format_pieb_inf_line
 format_access = nutzip.format_access
 write_econet_xattrs = nutzip.write_econet_xattrs
 sanitise_extract_path = nutzip.sanitise_extract_path
@@ -403,20 +403,20 @@ class TestParseEncodedFilename:
 
 
 class TestParseInfLine:
-    def test_acorn_inf_with_access(self):
+    def test_trad_inf_with_access(self):
         result = parse_inf_line("SetStation  FFFFDD00 FFFFDD00 000002E3 03")
         assert result is not None
         source, meta = result
-        assert source == "inf"
+        assert source == "inf-trad"
         assert meta.load_addr == 0xFFFFDD00
         assert meta.exec_addr == 0xFFFFDD00
         assert meta.attr == 0x03
 
-    def test_acorn_inf_without_access(self):
+    def test_trad_inf_without_access(self):
         result = parse_inf_line("README      FFFFF004 FFFFF004 00000100")
         assert result is not None
         source, meta = result
-        assert source == "inf"
+        assert source == "inf-trad"
         assert meta.load_addr == 0xFFFFF004
         assert meta.attr is None
 
@@ -424,7 +424,7 @@ class TestParseInfLine:
         result = parse_inf_line("0 fffff93a c7524201 33")
         assert result is not None
         source, meta = result
-        assert source == "PiEB-inf"
+        assert source == "inf-pieb"
         assert meta.load_addr == 0xFFFFF93A
         assert meta.exec_addr == 0xC7524201
         assert meta.attr == 0x33
@@ -433,16 +433,16 @@ class TestParseInfLine:
         result = parse_inf_line("0 ffffdd00 ffffdd00 3")
         assert result is not None
         source, meta = result
-        assert source == "PiEB-inf"
+        assert source == "inf-pieb"
         assert meta.load_addr == 0xFFFFDD00
 
-    def test_acorn_inf_hex_filename(self):
-        # A filename like "FF" is valid hex but should be detected as Acorn
+    def test_trad_inf_hex_filename(self):
+        # A filename like "FF" is valid hex but should be detected as traditional
         # when field[3] is 8 digits (the length field)
         result = parse_inf_line("FF          FFFFDD00 FFFFDD00 00000010 03")
         assert result is not None
         source, meta = result
-        assert source == "inf"
+        assert source == "inf-trad"
         assert meta.load_addr == 0xFFFFDD00
 
     def test_too_few_fields(self):
@@ -465,7 +465,7 @@ class TestParseInfLine:
         result = parse_inf_line("0 fffff93a c7524201 33 0")
         assert result is not None
         source, meta = result
-        assert source == "PiEB-inf"
+        assert source == "inf-pieb"
 
 
 class TestBuildInfIndex:
@@ -491,11 +491,11 @@ class TestBuildInfIndex:
             index, consumed = build_inf_index(zf)
         assert "FILE" in index
         source, meta = index["FILE"]
-        assert source == "PiEB-inf"
+        assert source == "inf-pieb"
         assert meta.load_addr == 0xFFFFDD00
         assert "FILE.inf" in consumed
 
-    def test_acorn_inf_detected(self, tmp_path):
+    def test_trad_inf_detected(self, tmp_path):
         zip_filepath = self._make_zip_with_inf(
             tmp_path,
             [("PROG", b"\x00" * 16, "PROG        FFFF0E10 FFFF0E10 00000010 03")],
@@ -504,7 +504,7 @@ class TestBuildInfIndex:
             index, consumed = build_inf_index(zf)
         assert "PROG" in index
         source, meta = index["PROG"]
-        assert source == "inf"
+        assert source == "inf-trad"
         assert meta.load_addr == 0xFFFF0E10
         assert meta.attr == 0x03
 
@@ -554,24 +554,24 @@ class TestResolveMetadataWithInf:
 
     def test_inf_used_when_no_sparkfs(self):
         info = self._make_info("FILE")
-        inf_index = {"FILE": ("PiEB-inf", AcornMeta(load_addr=0xFFFFDD00, exec_addr=0xFFFFDD00, attr=3))}
+        inf_index = {"FILE": ("inf-pieb", AcornMeta(load_addr=0xFFFFDD00, exec_addr=0xFFFFDD00, attr=3))}
         source, clean, meta = resolve_metadata(info, inf_index=inf_index)
-        assert source == "PiEB-inf"
+        assert source == "inf-pieb"
         assert meta.load_addr == 0xFFFFDD00
 
     def test_sparkfs_beats_inf(self):
         extra = build_sparkfs_extra(0xFFFF0E10, 0xFFFF0E10, 0x03)
         info = self._make_info("FILE", extra=extra)
-        inf_index = {"FILE": ("PiEB-inf", AcornMeta(load_addr=0xFFFFDD00, exec_addr=0xFFFFDD00, attr=3))}
+        inf_index = {"FILE": ("inf-pieb", AcornMeta(load_addr=0xFFFFDD00, exec_addr=0xFFFFDD00, attr=3))}
         source, clean, meta = resolve_metadata(info, inf_index=inf_index)
         assert source == "sparkfs"
         assert meta.load_addr == 0xFFFF0E10
 
     def test_inf_beats_filename_encoding(self):
         info = self._make_info("FILE,ffb")
-        inf_index = {"FILE,ffb": ("inf", AcornMeta(load_addr=0xFFFF0E10, exec_addr=0xFFFF0E10, attr=3))}
+        inf_index = {"FILE,ffb": ("inf-trad", AcornMeta(load_addr=0xFFFF0E10, exec_addr=0xFFFF0E10, attr=3))}
         source, clean, meta = resolve_metadata(info, inf_index=inf_index)
-        assert source == "inf"
+        assert source == "inf-trad"
         assert meta.load_addr == 0xFFFF0E10
 
 
@@ -633,48 +633,48 @@ class TestResolveMetadata:
 # =========================================================================
 
 
-class TestFormatAcornInfLine:
+class TestFormatTradInfLine:
     def test_basic_format(self):
-        line = format_acorn_inf_line("UTILS", 0xFFFF0E00, 0x0000801F, 0x100, 0x03)
+        line = format_trad_inf_line("UTILS", 0xFFFF0E00, 0x0000801F, 0x100, 0x03)
         assert line == "UTILS       FFFF0E00 0000801F 00000100 03"
 
     def test_without_attr(self):
-        line = format_acorn_inf_line("FILE", 0xFFFF0E10, 0xFFFF0E10, 0x80)
+        line = format_trad_inf_line("FILE", 0xFFFF0E10, 0xFFFF0E10, 0x80)
         assert line == "FILE        FFFF0E10 FFFF0E10 00000080"
 
     def test_long_filename(self):
-        line = format_acorn_inf_line("VERYLONGNAME", 0x1900, 0x801F, 0x100)
+        line = format_trad_inf_line("VERYLONGNAME", 0x1900, 0x801F, 0x100)
         assert line.startswith("VERYLONGNAME ")
         assert "00001900" in line
 
     def test_short_filename_padded(self):
-        line = format_acorn_inf_line("A", 0, 0, 0)
+        line = format_trad_inf_line("A", 0, 0, 0)
         assert line.startswith("A          ")
 
     def test_zero_addresses(self):
-        line = format_acorn_inf_line("FILE", 0, 0, 0, 0)
+        line = format_trad_inf_line("FILE", 0, 0, 0, 0)
         assert "00000000 00000000 00000000 00" in line
 
     def test_max_addresses(self):
-        line = format_acorn_inf_line("FILE", 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFF)
+        line = format_trad_inf_line("FILE", 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFF)
         assert "FFFFFFFF FFFFFFFF FFFFFFFF FF" in line
 
 
 class TestFormatPibridgeInfLine:
     def test_basic_format(self):
-        line = format_pibridge_inf_line(0xFFFF0E23, 0xFFFF0E23, 0x15, owner=0)
+        line = format_pieb_inf_line(0xFFFF0E23, 0xFFFF0E23, 0x15, owner=0)
         assert line == "0 ffff0e23 ffff0e23 15"
 
     def test_with_owner(self):
-        line = format_pibridge_inf_line(0xFFFF0E10, 0xFFFF0E10, 0x03, owner=5)
+        line = format_pieb_inf_line(0xFFFF0E10, 0xFFFF0E10, 0x03, owner=5)
         assert line == "5 ffff0e10 ffff0e10 3"
 
     def test_default_perm_for_none_attr(self):
-        line = format_pibridge_inf_line(0xFFFF0E10, 0xFFFF0E10, attr=None)
+        line = format_pieb_inf_line(0xFFFF0E10, 0xFFFF0E10, attr=None)
         assert line == "0 ffff0e10 ffff0e10 17"
 
     def test_zero_addresses(self):
-        line = format_pibridge_inf_line(0, 0, 0, owner=0)
+        line = format_pieb_inf_line(0, 0, 0, owner=0)
         assert line == "0 0 0 0"
 
 
@@ -797,7 +797,7 @@ class TestNetUtilsZip:
         assert (out / "SetStation").is_file()
         assert (out / "ReadMe").is_file()
 
-    def test_extract_acorn_inf(self, tmp_path):
+    def test_extract_trad_inf(self, tmp_path):
         runner = CliRunner()
         out = tmp_path / "out"
         runner.invoke(
@@ -808,7 +808,7 @@ class TestNetUtilsZip:
                 "-d",
                 str(out),
                 "--meta-format",
-                "acorn",
+                "inf-trad",
             ],
         )
         inf = (out / "Free.inf").read_text()
@@ -822,7 +822,7 @@ class TestNetUtilsZip:
         # Length should be file size in hex
         assert int(parts[3], 16) == 486
 
-    def test_extract_pibridge_inf(self, tmp_path):
+    def test_extract_pieb_inf(self, tmp_path):
         runner = CliRunner()
         out = tmp_path / "out"
         runner.invoke(
@@ -833,7 +833,7 @@ class TestNetUtilsZip:
                 "-d",
                 str(out),
                 "--meta-format",
-                "pibridge",
+                "inf-pieb",
             ],
         )
         inf = (out / "Free.inf").read_text().strip()
@@ -843,7 +843,7 @@ class TestNetUtilsZip:
         assert parts[1] == "ffff0e10"
         assert parts[2] == "ffff0e10"
 
-    def test_extract_pibridge_inf_custom_owner(self, tmp_path):
+    def test_extract_pieb_inf_custom_owner(self, tmp_path):
         runner = CliRunner()
         out = tmp_path / "out"
         runner.invoke(
@@ -854,7 +854,7 @@ class TestNetUtilsZip:
                 "-d",
                 str(out),
                 "--meta-format",
-                "pibridge",
+                "inf-pieb",
                 "--owner",
                 "42",
             ],
@@ -983,7 +983,7 @@ class TestSwehEconetSystemZip:
             inf_files = [i for i in zf.infolist() if i.filename.endswith(".inf")]
             assert len(inf_files) > 0
 
-    def test_inf_files_are_pibridge_format(self):
+    def test_inf_files_are_pieb_format(self):
         """Bundled .inf files use PiEconetBridge format: owner load exec perm."""
         with zipfile.ZipFile(SWEH_ZIP_FILEPATH) as zf:
             for info in zf.infolist():
@@ -1204,14 +1204,14 @@ class TestExtractMember:
             extract_member(zf, info, tmp_path / "out", meta_format=None)
         assert (tmp_path / "out" / "greeting").read_bytes() == data
 
-    def test_sparkfs_acorn_inf(self, tmp_path):
+    def test_sparkfs_trad_inf(self, tmp_path):
         extra = build_sparkfs_extra(0xFFFF0E10, 0x0000801F, 0x03)
         data = b"\x00" * 64
         zip_filepath = make_zip_file(tmp_path, [("PROG", data, extra)])
         with zipfile.ZipFile(zip_filepath) as zf:
             info = zf.infolist()[0]
             extract_member(
-                zf, info, tmp_path / "out", meta_format=MetaFormat.ACORN
+                zf, info, tmp_path / "out", meta_format=MetaFormat.INF_TRAD
             )
         inf = (tmp_path / "out" / "PROG.inf").read_text().strip()
         parts = inf.split()
@@ -1221,7 +1221,7 @@ class TestExtractMember:
         assert parts[3] == "00000040"  # 64 bytes
         assert parts[4] == "03"
 
-    def test_sparkfs_pibridge_inf(self, tmp_path):
+    def test_sparkfs_pieb_inf(self, tmp_path):
         extra = build_sparkfs_extra(0xFFFF0E10, 0x0000801F, 0x03)
         data = b"\x00" * 64
         zip_filepath = make_zip_file(tmp_path, [("PROG", data, extra)])
@@ -1231,7 +1231,7 @@ class TestExtractMember:
                 zf,
                 info,
                 tmp_path / "out",
-                meta_format=MetaFormat.PIBRIDGE,
+                meta_format=MetaFormat.INF_PIEB,
                 owner=7,
             )
         inf = (tmp_path / "out" / "PROG.inf").read_text().strip()
@@ -1527,8 +1527,8 @@ def _make_zip_with_inf(tmp_path, entries, name="test.zip"):
 
 
 class TestCliBundledInf:
-    def test_extract_pieb_inf_creates_acorn_inf(self, tmp_path):
-        """Bundled PiEB .inf is consumed and rewritten as Acorn INF."""
+    def test_extract_pieb_inf_creates_trad_inf(self, tmp_path):
+        """Bundled PiEB .inf is consumed and rewritten as traditional INF."""
         zip_filepath = _make_zip_with_inf(
             tmp_path, [("FILE", b"\x00" * 8, "0 ffffdd00 ffffdd00 3")]
         )
@@ -1541,7 +1541,7 @@ class TestCliBundledInf:
         inf = (out / "FILE.inf").read_text().strip()
         assert "FFFFDD00" in inf
         # The bundled PiEB .inf should NOT be extracted as a separate file
-        # (it would conflict with the rewritten Acorn .inf)
+        # (it would conflict with the rewritten traditional .inf)
 
     @requires_xattr
     def test_extract_pieb_inf_as_xattr(self, tmp_path):
@@ -1587,11 +1587,11 @@ class TestCliBundledInf:
         result = runner.invoke(cli, ["list", str(zip_filepath)])
         assert result.exit_code == 0
         assert "FILE" in result.output
-        assert "PiEB-inf" in result.output
+        assert "inf-pieb" in result.output
         # The .inf file itself should not appear in the listing
         assert "FILE.inf" not in result.output
 
-    def test_list_shows_acorn_inf_source(self, tmp_path):
+    def test_list_shows_trad_inf_source(self, tmp_path):
         zip_filepath = _make_zip_with_inf(
             tmp_path,
             [("PROG", b"\x00" * 16, "PROG        FFFF0E10 FFFF0E10 00000010 03")],
@@ -1600,7 +1600,7 @@ class TestCliBundledInf:
         result = runner.invoke(cli, ["list", str(zip_filepath)])
         assert result.exit_code == 0
         assert "PROG" in result.output
-        assert "inf" in result.output
+        assert "inf-trad" in result.output
 
     def test_info_counts_pieb_inf(self, tmp_path):
         zip_filepath = _make_zip_with_inf(
@@ -1615,10 +1615,10 @@ class TestCliBundledInf:
         result = runner.invoke(cli, ["info", str(zip_filepath)])
         assert result.exit_code == 0
         assert "Files:      3" in result.output
-        assert "PiEB-inf:   2" in result.output
+        assert "inf-pieb:   2" in result.output
         assert "Plain:      1" in result.output
 
-    def test_info_counts_acorn_inf(self, tmp_path):
+    def test_info_counts_trad_inf(self, tmp_path):
         zip_filepath = _make_zip_with_inf(
             tmp_path,
             [("PROG", b"\x00" * 16, "PROG        FFFF0E10 FFFF0E10 00000010 03")],
@@ -1626,7 +1626,7 @@ class TestCliBundledInf:
         runner = CliRunner()
         result = runner.invoke(cli, ["info", str(zip_filepath)])
         assert result.exit_code == 0
-        assert "INF:        1" in result.output
+        assert "inf-trad:   1" in result.output
 
 
 class TestSwehBundledInf:
@@ -1636,9 +1636,9 @@ class TestSwehBundledInf:
         runner = CliRunner()
         result = runner.invoke(cli, ["info", str(SWEH_ZIP_FILEPATH)])
         assert result.exit_code == 0
-        assert "PiEB-inf:" in result.output
+        assert "inf-pieb:" in result.output
         # Should have PiEB-inf entries, not all plain
-        pieb_line = [l for l in result.output.splitlines() if "PiEB-inf:" in l][0]
+        pieb_line = [l for l in result.output.splitlines() if "inf-pieb:" in l][0]
         count = int(pieb_line.split(":")[1].strip().split()[0])
         assert count > 0
 
@@ -1646,7 +1646,7 @@ class TestSwehBundledInf:
         runner = CliRunner()
         result = runner.invoke(cli, ["list", str(SWEH_ZIP_FILEPATH)])
         assert result.exit_code == 0
-        assert "PiEB-inf" in result.output
+        assert "inf-pieb" in result.output
 
     @requires_xattr
     def test_extract_xattr_no_inf_files(self, tmp_path):

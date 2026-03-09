@@ -118,8 +118,8 @@ $ ./nutzip.py list NetUtils.zip
 ```
 
 The **Source** column shows where the metadata was found: `sparkfs` for
-SparkFS/ARC0 extra fields, `inf` or `PiEB-inf` for bundled INF sidecar files,
-or `filename` for filename-encoded metadata. The **Type** column shows the
+SparkFS/ARC0 extra fields, `inf-trad` or `inf-pieb` for bundled INF sidecar
+files, or `filename` for filename-encoded metadata. The **Type** column shows the
 RISC OS filetype extracted from the load address (when the top 12 bits are
 `0xFFF`).
 
@@ -131,8 +131,8 @@ Archive:    NetUtils.zip
 Files:      12
 Dirs:       0
 SparkFS:    12 files with ARC0 extra fields
-INF:        0 files with bundled Acorn INF
-PiEB-inf:   0 files with bundled PiEconetBridge INF
+inf-trad:   0 files with bundled traditional INF
+inf-pieb:   0 files with bundled PiEconetBridge INF
 Filename:   0 files with encoded filenames
 Plain:      0 files without Acorn metadata
 Filetypes:  6 distinct
@@ -156,20 +156,19 @@ Options:
   -d, --output-dir PATH           Output directory (default: ZIP filename
                                   without extension).
   -v, --verbose                   Show extraction progress.
-  --meta-format [acorn|pibridge|xattr|filename-riscos|filename-mos|none]
-                                  Metadata format: acorn INF, pibridge INF,
-                                  xattr, filename-riscos, filename-mos, or
-                                  none.
+  --meta-format [inf-trad|inf-pieb|xattr|filename-riscos|filename-mos|none]
+                                  Metadata format: inf-trad, inf-pieb, xattr,
+                                  filename-riscos, filename-mos, or none.
   --no-decode-filenames           Do not decode metadata from filename
                                   suffixes (,xxx or ,load,exec).
-  --owner INTEGER                 Econet owner ID for PiEconetBridge INF files
-                                  (default: 0 = SYST).
+  --owner INTEGER                 Econet owner ID for inf-pieb files (default:
+                                  0 = SYST).
   --help                          Show this message and exit.
 ```
 
 nutzip supports three output metadata formats, selected with `--meta-format`.
 
-### Format 1: Acorn INF (default)
+### Format 1: Traditional INF (default)
 
 ```
 ./nutzip.py extract NetUtils.zip
@@ -205,7 +204,7 @@ This is the standard format understood by BBC Micro emulators, disc image tools
 ### Format 2: PiEconetBridge INF
 
 ```
-./nutzip.py extract --meta-format pibridge NetUtils.zip
+./nutzip.py extract --meta-format inf-pieb NetUtils.zip
 ```
 
 Writes `.inf` sidecar files in the format used by
@@ -346,16 +345,16 @@ Some ZIP archives include `.inf` sidecar files alongside the data files they
 describe. nutzip detects and parses these automatically, supporting both
 flavours:
 
-- **Acorn INF** (`filename load exec length [access]`) --- reported
-  as source `inf` in the list and info commands.
+- **Traditional INF** (`filename load exec length [access]`) --- reported
+  as source `inf-trad` in the list and info commands.
 - **PiEconetBridge INF** (`owner load exec perm`) --- reported as source
-  `PiEB-inf`.
+  `inf-pieb`.
 
 When extracting, bundled `.inf` files are consumed as a metadata source rather
 than extracted as separate files. The metadata is then written in whatever
-output format was requested (Acorn INF, PiEconetBridge INF, or xattr). This
-allows, for example, converting a PiEconetBridge archive to xattr format in a
-single step.
+output format was requested (inf-trad, inf-pieb, xattr, etc.). This allows,
+for example, converting a PiEconetBridge archive to xattr format in a single
+step.
 
 With `--meta-format none`, bundled `.inf` files are extracted as-is (no
 metadata is consumed).
