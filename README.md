@@ -1,6 +1,6 @@
 # oaknut-zip
 
-A standalone Python script for extracting ZIP files containing
+A Python tool for extracting ZIP files containing
 [Acorn computer](https://en.wikipedia.org/wiki/Acorn_Computers) metadata.
 
 Standard unzip tools silently discard the load addresses, execution addresses,
@@ -59,26 +59,27 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 See the [uv installation docs](https://docs.astral.sh/uv/getting-started/installation/)
 for other methods including pip, pipx, Cargo, Conda, Winget, and Scoop.
 
+## Installation
+
+Install with `uv` (recommended), `pip`, or `pipx`:
+
+```
+uv tool install oaknut-zip
+```
+
+Or run without installing:
+
+```
+uvx oaknut-zip <command> [options]
+```
+
 ## Usage
-
-oaknut-zip is a single-file [PEP 723](https://peps.python.org/pep-0723/) script
-with an embedded dependency table. Run it directly:
-
-```
-./oaknut_zip.py <command> [options]
-```
-
-Or explicitly via uv:
-
-```
-uv run oaknut_zip.py <command> [options]
-```
 
 ### Commands
 
 ```
-$ ./oaknut_zip.py --help
-Usage: oaknut_zip.py [OPTIONS] COMMAND [ARGS]...
+$ oaknut-zip --help
+Usage: oaknut-zip [OPTIONS] COMMAND [ARGS]...
 
   Work with ZIP files containing Acorn computer metadata.
 
@@ -97,7 +98,7 @@ Commands:
 ### list --- tabular view of all entries
 
 ```
-$ ./oaknut_zip.py list NetUtils.zip
+$ oaknut-zip list NetUtils.zip
                                NetUtils.zip                                
 ┏━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━━━┓
 ┃ Filename   ┃     Load ┃     Exec ┃   Length ┃     Attr ┃ Type ┃ Source  ┃
@@ -125,7 +126,7 @@ shows the RISC OS filetype extracted from the load address (when the top
 ### info --- summary statistics
 
 ```
-$ ./oaknut_zip.py info NetUtils.zip
+$ oaknut-zip info NetUtils.zip
 Archive:    NetUtils.zip
 Files:      12
 Dirs:       0
@@ -146,8 +147,8 @@ Filetypes:  6 distinct
 ## Extracting an archive
 
 ```
-$ ./oaknut_zip.py extract --help
-Usage: oaknut_zip.py extract [OPTIONS] ZIPFILE_PATH
+$ oaknut-zip extract --help
+Usage: oaknut-zip extract [OPTIONS] ZIPFILE_PATH
 
   Extract a ZIP file, preserving Acorn metadata.
 
@@ -183,7 +184,7 @@ the `list` and `info` commands, and as `--meta-format` choices for output:
 ### Format 1: Traditional INF (default)
 
 ```
-./oaknut_zip.py extract NetUtils.zip
+oaknut-zip extract NetUtils.zip
 ```
 
 Each extracted file gets a companion `.inf` sidecar file:
@@ -216,7 +217,7 @@ This is the standard format understood by BBC Micro emulators, disc image tools
 ### Format 2: PiEconetBridge INF
 
 ```
-./oaknut_zip.py extract --meta-format inf-pieb NetUtils.zip
+oaknut-zip extract --meta-format inf-pieb NetUtils.zip
 ```
 
 Writes `.inf` sidecar files in the format used by
@@ -250,7 +251,7 @@ produced by the `parse_acorn_zip.pl` utility bundled with PiEconetBridge.
 ### Format 3: Extended attributes (xattr)
 
 ```
-./oaknut_zip.py extract --meta-format xattr NetUtils.zip
+oaknut-zip extract --meta-format xattr NetUtils.zip
 ```
 
 Writes metadata directly into the filesystem's extended attributes, with no
@@ -287,7 +288,7 @@ xattrs in preference to `.inf` files when both are present.
 ### Format 4: RISC OS filename encoding
 
 ```
-./oaknut_zip.py extract --meta-format filename-riscos NetUtils.zip
+oaknut-zip extract --meta-format filename-riscos NetUtils.zip
 ```
 
 Encodes metadata directly into the output filenames using comma-separated hex
@@ -302,7 +303,7 @@ the correct suffix are not double-encoded.
 ### Format 5: MOS filename encoding
 
 ```
-./oaknut_zip.py extract --meta-format filename-mos NetUtils.zip
+oaknut-zip extract --meta-format filename-mos NetUtils.zip
 ```
 
 Encodes metadata into output filenames using the `,load-exec` convention
@@ -318,7 +319,7 @@ load/exec addresses and does not special-case filetype-stamped files.
 ### Format 6: No metadata
 
 ```
-./oaknut_zip.py extract --meta-format none NetUtils.zip
+oaknut-zip extract --meta-format none NetUtils.zip
 ```
 
 Extracts files only, discarding all Acorn metadata. Equivalent to a standard
@@ -444,7 +445,7 @@ for files served by PiEconetBridge.
 ## Running the tests
 
 ```
-uv run --with pytest --with xattr pytest tests/ -v
+uv run --group test pytest tests/ -v
 ```
 
 The test suite covers all parsing, formatting, and extraction logic,
