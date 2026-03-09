@@ -158,7 +158,21 @@ def list_cmd(zipfile_path: Path) -> None:
 
     for entry, display_name in zip(entries, tree_names):
         if entry[IS_DIR_KEY]:
-            table.add_row(display_name, "", "", "", "", "", "")
+            if entry[LOAD_ADDR_KEY] is not None:
+                ft = entry[FILETYPE_KEY]
+                ft_str = f"{ft:03X}" if ft is not None else ""
+                attr_str = format_access(entry[ATTR_KEY]) if entry[ATTR_KEY] is not None else ""
+                table.add_row(
+                    display_name,
+                    f"{entry[LOAD_ADDR_KEY]:08X}",
+                    f"{entry[EXEC_ADDR_KEY]:08X}",
+                    "",
+                    attr_str,
+                    ft_str,
+                    entry[SOURCE_KEY],
+                )
+            else:
+                table.add_row(display_name, "", "", "", "", "", "")
             continue
 
         if entry[LOAD_ADDR_KEY] is not None:

@@ -267,7 +267,7 @@ def list_archive(
             if info.filename in consumed_inf_filenames:
                 continue
             if info.is_dir():
-                entries.append({
+                entry = {
                     FILENAME_KEY: info.filename,
                     IS_DIR_KEY: True,
                     LOAD_ADDR_KEY: None,
@@ -276,7 +276,16 @@ def list_archive(
                     ATTR_KEY: None,
                     FILETYPE_KEY: None,
                     SOURCE_KEY: SOURCE_DIR,
-                })
+                }
+                inf_entry = inf_index.get(info.filename)
+                if inf_entry is not None:
+                    source_label, meta = inf_entry
+                    entry[SOURCE_KEY] = source_label
+                    entry[LOAD_ADDR_KEY] = meta.load_addr
+                    entry[EXEC_ADDR_KEY] = meta.exec_addr
+                    entry[ATTR_KEY] = meta.attr
+                    entry[FILETYPE_KEY] = meta.infer_filetype()
+                entries.append(entry)
                 continue
 
             metadata_source, clean_name, meta = resolve_metadata(

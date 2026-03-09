@@ -182,7 +182,8 @@ def build_inf_index(
             continue
 
         data_filename = info.filename[:-4]
-        if data_filename not in names:
+        dir_filename = data_filename + "/"
+        if data_filename not in names and dir_filename not in names:
             continue
 
         try:
@@ -194,7 +195,8 @@ def build_inf_index(
         result = parse_inf_line(line)
         if result is not None:
             source_label, meta = result
-            index[data_filename] = (source_label, meta)
+            key = dir_filename if dir_filename in names else data_filename
+            index[key] = (source_label, meta)
             consumed.add(info.filename)
 
     return index, consumed
